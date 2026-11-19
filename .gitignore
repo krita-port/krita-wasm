@@ -1,0 +1,6 @@
+/cache/
+/build/
+__pycache__/
+*.pyc
+/dist/
+/node_modules/
