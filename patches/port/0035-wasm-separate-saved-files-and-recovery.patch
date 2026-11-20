@@ -1,0 +1,100 @@
+diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
+--- a/libs/ui/KisDocument.cpp
++++ b/libs/ui/KisDocument.cpp
+@@ -1090,11 +1090,10 @@
+             d->updateDocumentMetadataOnSaving(job.filePath, job.mimeType);
+ 
+ #ifdef Q_OS_WASM
+-            // A completed VFS save is not confirmation of a browser download.
+-            if (job.mimeType == nativeFormatMimeType()) {
+-                extern void kritaWasmKeepSavedRecovery(const QString &, const QString &);
+-                kritaWasmKeepSavedRecovery(job.filePath, generateAutoSaveFileName(QString()));
+-            } else {
++            // Manual files and autosave recovery have independent lifetimes.
++            extern bool kritaWasmKeepSavedFile(KisDocument *, const QString &);
++            kritaWasmKeepSavedFile(this, job.filePath);
++            if (job.mimeType != nativeFormatMimeType()) {
+                 // Preserve native layers even when Save writes a flattened format.
+                 setProperty("kritaWasmRecoveryAfterSave", true);
+                 QTimer::singleShot(0, this, SLOT(slotAutoSave()));
+@@ -1925,8 +1924,8 @@
+ {
+ #ifdef Q_OS_WASM
+     // Browser sessions have no distinct desktop PID or persistent source path.
+-    extern QString kritaWasmRecoveryFileName(const KisDocument *);
+-    return kritaWasmRecoveryFileName(this);
++    extern QString kritaWasmRecoveryFileName(const KisDocument *, const QString &);
++    return kritaWasmRecoveryFileName(this, path);
+ #endif
+     QString retval;
+ 
+@@ -2034,7 +2033,8 @@
+     bool ret = openPathInternal(path);
+ #ifdef Q_OS_WASM
+     if (ret && (flags & RecoveryFile)) {
+-        setProperty("kritaWasmRecoveryPath", path);
++        extern void kritaWasmRestoreRecoveryIdentity(KisDocument *, const QString &);
++        kritaWasmRestoreRecoveryIdentity(this, path);
+     }
+ #endif
+ 
+@@ -2324,6 +2324,14 @@
+ 
+ void KisDocument::removeAutoSaveFiles(const QString &autosaveBaseName, bool wasRecovered)
+ {
++#ifdef Q_OS_WASM
++    // Discard must never remove the user's separately saved browser file,
++    // even if its chosen name happens to end with "-autosave.kra".
++    QFile::remove(generateAutoSaveFileName(localFilePath()));
++    extern void kritaWasmSyncRecovery();
++    kritaWasmSyncRecovery();
++    return;
++#endif
+     // Eliminate any auto-save file
+     QString asf = generateAutoSaveFileName(autosaveBaseName);   // the one in the current dir
+     if (QFile::exists(asf)) {
+diff --git a/libs/ui/KisMainWindow.cpp b/libs/ui/KisMainWindow.cpp
+--- a/libs/ui/KisMainWindow.cpp
++++ b/libs/ui/KisMainWindow.cpp
+@@ -1375,6 +1375,15 @@
+     QByteArray oldMimeFormat = document->mimeType();
+ 
+     QUrl suggestedURL = QUrl::fromLocalFile(document->path());
++#ifdef Q_OS_WASM
++    const QDir browserFiles(QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR")));
++    if (!document->path().startsWith(browserFiles.absolutePath() + QLatin1Char('/'))) {
++        const QString saved = document->property("kritaWasmSavedPath").toString();
++        const QString name = QFileInfo(document->path()).fileName();
++        suggestedURL = !saved.isEmpty() ? QUrl::fromLocalFile(saved)
++            : name.isEmpty() ? QUrl() : QUrl::fromLocalFile(browserFiles.filePath(name));
++    }
++#endif
+ 
+     QStringList mimeFilter = KisImportExportManager::supportedMimeTypes(KisImportExportManager::Export);
+ 
+@@ -1433,6 +1442,10 @@
+             // Get the last used location for saving
+             KConfigGroup group =  KSharedConfig::openConfig()->group("File Dialogs");
+             QString proposedPath = group.readEntry("SaveAs", "");
++#ifdef Q_OS_WASM
++            if (proposedPath != browserFiles.absolutePath() && !proposedPath.startsWith(browserFiles.absolutePath() + QLatin1Char('/')))
++                proposedPath = browserFiles.absolutePath();
++#endif
+             // if that is empty, get the last used location for loading
+             if (proposedPath.isEmpty()) {
+                 proposedPath = group.readEntry("OpenDocument", "");
+diff --git a/libs/widgetutils/KoFileDialog.cpp b/libs/widgetutils/KoFileDialog.cpp
+--- a/libs/widgetutils/KoFileDialog.cpp
++++ b/libs/widgetutils/KoFileDialog.cpp
+@@ -74,6 +74,11 @@
+ 
+ KoFileDialog::~KoFileDialog()
+ {
++#ifdef Q_OS_WASM
++    // Native directory creation/rename/delete must persist even on Cancel.
++    extern void kritaWasmSyncRecovery();
++    kritaWasmSyncRecovery();
++#endif
+     delete d;
+ }
+ 

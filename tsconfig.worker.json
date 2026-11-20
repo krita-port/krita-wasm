@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2023",
+      "WebWorker"
+    ],
+    "moduleDetection": "legacy",
+    "rootDir": "web",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "types": [],
+    "strict": true,
+    "noEmit": true
+  },
+  "include": [
+    "web/isolation-sw.ts"
+  ]
+}

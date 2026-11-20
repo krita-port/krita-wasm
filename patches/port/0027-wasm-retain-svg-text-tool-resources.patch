@@ -1,0 +1,25 @@
+Subject: [PATCH] Retain SVG text tool resources in the static Wasm application
+
+Use explicit Qt resource sources in the browser profile so the existing
+static-plugin collector anchors their initializer. Otherwise archive dead
+stripping removes all eight text cursor images and the text tool QML.
+Preserve the native AUTORCC input.
+
+diff --git a/plugins/tools/svgtexttool/CMakeLists.txt b/plugins/tools/svgtexttool/CMakeLists.txt
+--- a/plugins/tools/svgtexttool/CMakeLists.txt
++++ b/plugins/tools/svgtexttool/CMakeLists.txt
+@@ -49,8 +49,13 @@
+ 
+ set(SvgTextTool_SOURCES
+     Plugin.cpp
+-    svgtexttool.qrc
+ )
++if(EMSCRIPTEN)
++    # Expose the resource initializer to the existing static-plugin collector.
++    qt_add_resources(SvgTextTool_SOURCES svgtexttool.qrc)
++else()
++    list(APPEND SvgTextTool_SOURCES svgtexttool.qrc)
++endif()
+ 
+ 
+ kis_add_library(krita_tool_svgtext_static STATIC ${SvgTextTool_SRCS})

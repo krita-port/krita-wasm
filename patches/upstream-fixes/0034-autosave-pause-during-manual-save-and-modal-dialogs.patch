@@ -1,0 +1,50 @@
+Subject: [PATCH] Pause autosave during manual saves and modal dialogs
+
+Related upstream issue: https://bugs.kde.org/show_bug.cgi?id=410024
+The report describes manual saves being lost while autosave is in progress.
+Pause new snapshots and finish an active save before choosing a destination;
+defer periodic autosave while a modal dialog is active.
+
+diff --git a/libs/ui/KisMainWindow.cpp b/libs/ui/KisMainWindow.cpp
+--- a/libs/ui/KisMainWindow.cpp
++++ b/libs/ui/KisMainWindow.cpp
+@@ -28,6 +28,7 @@
+ #include <QMutex>
+ #include <QMutexLocker>
+ #include <QPointer>
++#include <QScopeGuard>
+ #include <KisSignalMapper.h>
+ #include <QTabBar>
+ #include <QMoveEvent>
+@@ -1325,6 +1326,15 @@
+     std::unique_lock<QMutex> l(d->savingEntryMutex, std::try_to_lock);
+     if (!l.owns_lock()) return false;
+ 
++    // A periodic autosave must not start while the user chooses a destination.
++    // Finish a snapshot already in progress before initiating the manual save.
++    const bool autosaveWasActive = document->isAutoSaveActive();
++    document->setAutoSaveActive(false);
++    const auto restoreAutosave = qScopeGuard([document, autosaveWasActive] {
++        document->setAutoSaveActive(autosaveWasActive);
++    });
++    document->waitForSavingToComplete();
++
+     // no busy wait for saving because it is dangerous!
+     KisDelayedSaveDialog dlg(document->image(), KisDelayedSaveDialog::SaveDialog, 0, this);
+     dlg.blockIfImageIsBusy();
+diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
+--- a/libs/ui/KisDocument.cpp
++++ b/libs/ui/KisDocument.cpp
+@@ -1552,6 +1552,12 @@
+         return;
+ #endif
+     }
++    // Modal dialogs may themselves start saving or discard this document.
++    // Do not start a competing background snapshot from their nested loop.
++    if (qApp->activeModalWidget()) {
++        setAutoSaveDelay(10);
++        return;
++    }
+     const QString autoSaveFileName = generateAutoSaveFileName(localFilePath());
+ 
+     Q_EMIT statusBarMessage(i18n("Autosaving... %1", autoSaveFileName), successMessageTimeout);

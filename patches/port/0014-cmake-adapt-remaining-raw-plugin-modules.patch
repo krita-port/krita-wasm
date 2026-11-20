@@ -1,0 +1,77 @@
+Subject: [PATCH] Route remaining plugin modules through the static adapter
+
+Wide-gamut selector and RGBE import used raw add_library and were absent
+from the explicit plugin registry. Convert them, including the optional
+WebP declarations, and reject future dynamic targets at configuration.
+
+diff --git a/plugins/dockers/widegamutcolorselector/CMakeLists.txt b/plugins/dockers/widegamutcolorselector/CMakeLists.txt
+--- a/plugins/dockers/widegamutcolorselector/CMakeLists.txt
++++ b/plugins/dockers/widegamutcolorselector/CMakeLists.txt
+@@ -26,7 +26,7 @@
+     WdgWGShadeLineEditor.ui
+ )
+ 
+-add_library(kritawgcolorselector MODULE ${KRITA_WGCOLORSELECTOR_SOURCES})
++kis_add_library(kritawgcolorselector MODULE ${KRITA_WGCOLORSELECTOR_SOURCES})
+ 
+ target_link_libraries(kritawgcolorselector kritaui)
+ 
+diff --git a/plugins/impex/rgbe/CMakeLists.txt b/plugins/impex/rgbe/CMakeLists.txt
+--- a/plugins/impex/rgbe/CMakeLists.txt
++++ b/plugins/impex/rgbe/CMakeLists.txt
+@@ -7,7 +7,7 @@
+     RGBEImport.cpp
+ )
+ 
+-add_library(kritargbeimport MODULE ${kritargbeimport_SOURCES})
++kis_add_library(kritargbeimport MODULE ${kritargbeimport_SOURCES})
+ target_link_libraries(kritargbeimport kritaui kritargbeimportutils)
+ 
+ install(TARGETS kritargbeimport DESTINATION ${KRITA_PLUGIN_INSTALL_DIR})
+diff --git a/plugins/impex/webp/CMakeLists.txt b/plugins/impex/webp/CMakeLists.txt
+--- a/plugins/impex/webp/CMakeLists.txt
++++ b/plugins/impex/webp/CMakeLists.txt
+@@ -6,7 +6,7 @@
+ )
+ ki18n_wrap_ui(kritawebpexport_SOURCES kis_wdg_options_webp.ui)
+ 
+-add_library(kritawebpexport MODULE ${kritawebpexport_SOURCES})
++kis_add_library(kritawebpexport MODULE ${kritawebpexport_SOURCES})
+ target_link_libraries(kritawebpexport kritaui kritalibkra kritaimpex WebP::webp WebP::libwebpmux)
+ 
+ install(TARGETS kritawebpexport  DESTINATION ${KRITA_PLUGIN_INSTALL_DIR})
+@@ -16,7 +16,7 @@
+     kis_webp_import.cpp
+ )
+ 
+-add_library(kritawebpimport MODULE ${kritawebpimport_SOURCES})
++kis_add_library(kritawebpimport MODULE ${kritawebpimport_SOURCES})
+ target_link_libraries(kritawebpimport kritaui WebP::webp WebP::webpdemux)
+ 
+ install(TARGETS kritawebpimport DESTINATION ${KRITA_PLUGIN_INSTALL_DIR})
+diff --git a/cmake/modules/KritaWasmTargets.cmake b/cmake/modules/KritaWasmTargets.cmake
+--- a/cmake/modules/KritaWasmTargets.cmake
++++ b/cmake/modules/KritaWasmTargets.cmake
+@@ -86,3 +86,22 @@
+     target_sources(${target} PRIVATE "${source}")
+     target_link_libraries(${target} PRIVATE ${ARGN})
+ endfunction()
++
++# Fail configuration if a new raw module declaration bypasses the static port.
++function(krita_wasm_validate_targets directory)
++    get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
++    foreach(target IN LISTS targets)
++        get_target_property(type ${target} TYPE)
++        if(type STREQUAL "MODULE_LIBRARY" OR type STREQUAL "SHARED_LIBRARY")
++            message(FATAL_ERROR "Wasm target ${target} still has dynamic type ${type}")
++        endif()
++    endforeach()
++    get_property(children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
++    foreach(child IN LISTS children)
++        krita_wasm_validate_targets("${child}")
++    endforeach()
++endfunction()
++
++if(EMSCRIPTEN)
++    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL krita_wasm_validate_targets "${CMAKE_SOURCE_DIR}")
++endif()

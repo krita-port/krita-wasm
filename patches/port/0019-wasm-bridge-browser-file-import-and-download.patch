@@ -1,0 +1,27 @@
+diff --git a/krita/CMakeLists.txt b/krita/CMakeLists.txt
+--- a/krita/CMakeLists.txt
++++ b/krita/CMakeLists.txt
+@@ -210,7 +210,7 @@
+     if(NOT EXISTS "${KRITA_WASM_GLUE_DIR}/browser_status.cpp")
+         message(FATAL_ERROR "Set KRITA_WASM_GLUE_DIR to the port repository's src")
+     endif()
+-    qt_add_executable(krita ${krita_SRCS} "${KRITA_WASM_GLUE_DIR}/browser_status.cpp" "${KRITA_WASM_GLUE_DIR}/i18n.cpp")
++    qt_add_executable(krita ${krita_SRCS} "${KRITA_WASM_GLUE_DIR}/browser_status.cpp" "${KRITA_WASM_GLUE_DIR}/i18n.cpp" "${KRITA_WASM_GLUE_DIR}/browser_files.cpp")
+     set_property(TARGET krita APPEND PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS ENV)
+     get_property(wasm_plugins GLOBAL PROPERTY KRITA_WASM_PLUGIN_TARGETS)
+     target_link_libraries(krita PRIVATE kritaqmlcomponents)
+diff --git a/libs/ui/KisMainWindow.cpp b/libs/ui/KisMainWindow.cpp
+--- a/libs/ui/KisMainWindow.cpp
++++ b/libs/ui/KisMainWindow.cpp
+@@ -1837,6 +1837,11 @@
+ 
+ void KisMainWindow::slotFileOpen(bool isImporting)
+ {
++#ifdef Q_OS_WASM
++    extern void kritaWasmOpenDocument(KisMainWindow *, bool);
++    kritaWasmOpenDocument(this, isImporting);
++    return;
++#endif
+     QStringList urls = showOpenFileDialog(isImporting);
+ 
+     if (urls.isEmpty())

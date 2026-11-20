@@ -1,0 +1,12 @@
+pyseccomp==0.1.2
+polib==1.2.0
+types-polib==1.2.0.20261115
+Pillow==13.0.0
+ruff==0.17.5
+mypy==2.4.1
+# Pin the type checker dependency graph used by local checks and CI.
+ast-serialize==0.13.1
+librt==0.16.0
+mypy-extensions==1.2.0
+pathspec==1.1.1
+typing-extensions==4.16.0

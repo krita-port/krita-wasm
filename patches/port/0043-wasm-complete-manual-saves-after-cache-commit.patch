@@ -1,0 +1,122 @@
+Subject: [PATCH] Complete every manual Wasm save only after cache commit
+
+Apply the cache destination policy in the existing shared save preflight,
+including Save invoked by close/quit. An uploaded temporary file is not a
+persistent destination even when it exists and is writable.
+
+Gate the shared document completion on IDBFS acknowledgement before changing
+metadata, clearing the dirty state or emitting save/download success. Keep
+save/export callers waiting for that completion so failure cancels closing.
+Autosave retains its separate completion path; desktop behavior is unchanged.
+
+diff --git a/libs/ui/KisMainWindow.cpp b/libs/ui/KisMainWindow.cpp
+--- a/libs/ui/KisMainWindow.cpp
++++ b/libs/ui/KisMainWindow.cpp
+@@ -1381,6 +1381,10 @@
+ #ifdef Q_OS_WASM
+     const QDir browserFiles(QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR")));
+     if (!document->path().startsWith(browserFiles.absolutePath() + QLatin1Char('/'))) {
++        // Uploads are readable temporary files, not browser-cache destinations.
++        // This policy also covers Save invoked by closing views or quitting.
++        if (!isExporting)
++            saveas = true;
+         const QString saved = document->property("kritaWasmSavedPath").toString();
+         const QString name = QFileInfo(document->path()).fileName();
+         suggestedURL = !saved.isEmpty() ? QUrl::fromLocalFile(saved)
+diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
+--- a/libs/ui/KisDocument.cpp
++++ b/libs/ui/KisDocument.cpp
+@@ -7,6 +7,7 @@
+ 
+ #include "KisMainWindow.h" // XXX: remove
+ #include <QMessageBox>
++#include <QEventLoop>
+ 
+ #include <KisMimeDatabase.h>
+ 
+@@ -880,6 +881,24 @@
+                 i18n("Exporting Document...") :
+                 i18n("Saving Document...");
+ 
++#ifdef Q_OS_WASM
++    // A started background write is not a durable browser save. Keep all
++    // manual callers (including close/quit) waiting for the common completion.
++    QEventLoop saveLoop;
++    bool finished = false;
++    bool succeeded = false;
++    connect(this, &KisDocument::sigSavingFinished, &saveLoop, [&](const QString &path) {
++        if (path == job.filePath) {
++            finished = succeeded = true;
++            saveLoop.quit();
++        }
++    });
++    connect(this, &KisDocument::canceled, &saveLoop, [&] {
++        finished = true;
++        saveLoop.quit();
++    });
++#endif
++
+     KritaUtils::BackgroudSavingStartResult result =
+             initiateSavingInBackground(actionName,
+                                        this, SLOT(slotCompleteSavingDocument(KritaUtils::ExportFileJob, KisImportExportErrorCode, QString, QString)),
+@@ -922,7 +941,13 @@
+         return false;
+     }
+ 
++#ifdef Q_OS_WASM
++    if (result == KritaUtils::BackgroudSavingStartResult::Success && !finished)
++        saveLoop.exec(QEventLoop::ExcludeUserInputEvents);
++    return result == KritaUtils::BackgroudSavingStartResult::Success && succeeded;
++#else
+     return (result == KritaUtils::BackgroudSavingStartResult::Success);
++#endif
+ }
+ 
+ bool KisDocument::exportDocument(const QString &path, const QByteArray &mimeType, bool isAdvancedExporting, bool showWarnings, KisPropertiesConfigurationSP exportConfiguration)
+@@ -1039,8 +1064,24 @@
+ 
+ void KisDocument::slotCompleteSavingDocument(const KritaUtils::ExportFileJob &job, KisImportExportErrorCode status, const QString &errorMessage, const QString &warningMessage)
+ {
+-    if (status.isCancelled())
++    if (status.isCancelled()) {
++#ifdef Q_OS_WASM
++        Q_EMIT canceled(QString());
++#endif
+         return;
++    }
++
++#ifdef Q_OS_WASM
++    if (status.isOk()) {
++        // Keep isSaving()/close waiters active through the IDBFS commit, before
++        // marking the undo stack clean or notifying any save/download observer.
++        std::unique_lock<QMutex> persistenceLock(d->savingMutex);
++        extern bool kritaWasmCommitSavedFile(KisDocument *, const QString &, bool);
++        if (!kritaWasmCommitSavedFile(this, job.filePath,
++                                     job.flags & KritaUtils::SaveIsExporting))
++            status = ImportExportCodes::ErrorWhileWriting;
++    }
++#endif
+ 
+     const QString fileName = QFileInfo(job.filePath).fileName();
+ 
+@@ -1060,6 +1101,10 @@
+ 
+             dlg.exec();
+         }
++#ifdef Q_OS_WASM
++        // Failure must release the same manual-save wait as cancellation.
++        Q_EMIT canceled(QString());
++#endif
+     }
+     else {
+         if (!fileBatchMode() && !warningMessage.isEmpty()) {
+@@ -1090,9 +1135,6 @@
+             d->updateDocumentMetadataOnSaving(job.filePath, job.mimeType);
+ 
+ #ifdef Q_OS_WASM
+-            // Manual files and autosave recovery have independent lifetimes.
+-            extern bool kritaWasmKeepSavedFile(KisDocument *, const QString &);
+-            kritaWasmKeepSavedFile(this, job.filePath);
+             if (job.mimeType != nativeFormatMimeType()) {
+                 // Preserve native layers even when Save writes a flattened format.
+                 setProperty("kritaWasmRecoveryAfterSave", true);

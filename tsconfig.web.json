@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "rootDir": "web",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "types": [
+      "emscripten"
+    ],
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noEmit": true
+  },
+  "include": [
+    "web/**/*.ts"
+  ],
+  "exclude": [
+    "web/isolation-sw.ts"
+  ]
+}

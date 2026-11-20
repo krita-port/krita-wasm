@@ -1,0 +1,44 @@
+Subject: [PATCH] Scan plugin QML when importing static Wasm modules
+
+The executable source directory has no QML. Include the actual plugin and
+component roots, and the generated Krita component import path, so Qt links
+and registers their prebuilt static QML dependencies. Keep the existing
+QML popup resource reachable in its static library. Native builds are
+unchanged.
+
+diff --git a/krita/CMakeLists.txt b/krita/CMakeLists.txt
+--- a/krita/CMakeLists.txt
++++ b/krita/CMakeLists.txt
+@@ -214,6 +214,11 @@
+     set_property(TARGET krita APPEND PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS ENV)
+     get_property(wasm_plugins GLOBAL PROPERTY KRITA_WASM_PLUGIN_TARGETS)
+     target_link_libraries(krita PRIVATE kritaqmlcomponents)
++    # QML is embedded in plugin libraries outside the executable's source
++    # directory. Include those roots so Qt retains their static import plugins.
++    set_property(TARGET krita PROPERTY QT_QML_IMPORT_SCANNER_EXTRA_ROOT_PATHS
++        "${CMAKE_SOURCE_DIR}/plugins;${CMAKE_SOURCE_DIR}/qmlmodules")
++    set_property(TARGET krita APPEND PROPERTY QT_QML_IMPORT_PATH "${CMAKE_BINARY_DIR}/bin")
+     krita_wasm_import_plugins(krita ${wasm_plugins})
+     set_target_properties(krita PROPERTIES QT_WASM_EXPORT_NAME kritaWasm QT_WASM_PTHREAD_POOL_SIZE 8 QT_WASM_INITIAL_MEMORY 256MB)
+     if(NOT QT_FEATURE_wasm_jspi OR NOT QT_FEATURE_wasm_exceptions)
+diff --git a/qmlmodules/widgets/CMakeLists.txt b/qmlmodules/widgets/CMakeLists.txt
+--- a/qmlmodules/widgets/CMakeLists.txt
++++ b/qmlmodules/widgets/CMakeLists.txt
+@@ -1,9 +1,16 @@
+ set(kritaqmlwidgets_SRCS
+     KisQQuickWidget.cpp
+     KisQQuickPopupWidget.cpp
+-    kisquickwidgets.qrc
+ 
+ )
++
++if(EMSCRIPTEN)
++    # Use the same explicit resource sources as the other static libraries so
++    # krita_wasm_add_library retains the initializer in the executable.
++    qt_add_resources(kritaqmlwidgets_SRCS kisquickwidgets.qrc)
++else()
++    list(APPEND kritaqmlwidgets_SRCS kisquickwidgets.qrc)
++endif()
+ 
+ kis_add_library(kritaqmlwidgets SHARED ${kritaqmlwidgets_SRCS})
+ generate_export_header(kritaqmlwidgets)

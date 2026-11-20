@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+sdk_root=${EMSDK:-}
+if [[ -z "$sdk_root" ]]; then
+    compiler=$(command -v emcc || true)
+    if [[ -z "$compiler" ]]; then
+        echo "Emscripten not found. Load your configured SDK environment so emcc is on PATH." >&2
+        exit 1
+    fi
+    sdk_root=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve().parents[2])' "$compiler")
+fi
+if [[ ! -f "$sdk_root/.emscripten" ]]; then
+    echo "Missing emsdk configuration: $sdk_root/.emscripten" >&2
+    exit 1
+fi
+sdk_root=$(cd -- "$sdk_root" && pwd)
+expected=$(cat "$project_root/.emscripten-version")
+actual=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])))' "$sdk_root/upstream/emscripten/emscripten-version.txt")
+if [[ "$actual" != "$expected" ]]; then
+    echo "Emscripten version mismatch: expected $expected, found $actual. Shared SDK was not changed." >&2
+    exit 1
+fi
+export EM_CONFIG="$sdk_root/.emscripten"
+export EMSDK="$sdk_root"
+# Keep compiler/linker intermediates with the disk-backed project build.
+export TMPDIR="$project_root/build/tmp"
+export EMCC_TEMP_DIR="$TMPDIR"
+mkdir -p -- "$TMPDIR"
+if [[ -n "${KRITA_SDK_DIR:-}" ]]; then
+    python3 - "$KRITA_SDK_DIR/sdk.json" "$expected" <<'PY'
+import json, sys
+sdk = json.load(open(sys.argv[1]))
+if sdk['emscripten'] != sys.argv[2] or sdk['target']['qt_linkage'] != 'static' or not sdk['target']['threads'] or sdk['target'].get('cxx_exceptions') != 'wasm-native' or sdk['target'].get('jspi') is not True:
+    raise SystemExit('Prebuilt SDK toolchain or Qt configuration mismatch')
+PY
+    export EM_CACHE="$KRITA_SDK_DIR/emscripten-cache"
+    export EM_FROZEN_CACHE=1
+    export PKG_CONFIG_PATH="$KRITA_SDK_DIR/target/lib/pkgconfig:$KRITA_SDK_DIR/target/share/pkgconfig"
+    if [[ ! -d "$EM_CACHE/sysroot" ]]; then
+        echo "Missing prebuilt Emscripten sysroot: $EM_CACHE" >&2
+        exit 1
+    fi
+else
+    echo "Missing KRITA_SDK_DIR; fetch and select the prebuilt SDK first." >&2
+    exit 1
+fi
+export EM_PORTS="$EM_CACHE/ports"
+export PATH="$sdk_root/upstream/emscripten:$sdk_root/upstream/bin:$PATH"
+if [[ $# == 0 ]]; then
+    echo "Usage: scripts/with-emsdk COMMAND [ARG ...]" >&2
+    exit 2
+fi
+exec "$@"

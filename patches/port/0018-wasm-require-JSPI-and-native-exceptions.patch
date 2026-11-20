@@ -1,0 +1,15 @@
+diff --git a/krita/CMakeLists.txt b/krita/CMakeLists.txt
+--- a/krita/CMakeLists.txt
++++ b/krita/CMakeLists.txt
+@@ -219,7 +219,10 @@ elseif(EMSCRIPTEN)
+     target_link_libraries(krita PRIVATE kritaqmlcomponents)
+     krita_wasm_import_plugins(krita ${wasm_plugins})
+     set_target_properties(krita PROPERTIES QT_WASM_EXPORT_NAME kritaWasm QT_WASM_PTHREAD_POOL_SIZE 8 QT_WASM_INITIAL_MEMORY 256MB)
+-    target_link_options(krita PRIVATE -sDISABLE_EXCEPTION_CATCHING=0 -sASSERTIONS=1)
++    if(NOT QT_FEATURE_wasm_jspi OR NOT QT_FEATURE_wasm_exceptions)
++        message(FATAL_ERROR "The browser port requires Qt JSPI and Wasm native exceptions")
++    endif()
++    target_link_options(krita PRIVATE -sASSERTIONS=1)
+ else()
+     add_executable(krita ${krita_SRCS})
+ endif()

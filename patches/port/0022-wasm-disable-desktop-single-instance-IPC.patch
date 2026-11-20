@@ -1,0 +1,49 @@
+Subject: [PATCH] Skip desktop local-peer IPC on WebAssembly
+
+Keep browser tabs independent. Do not create native local servers or lock
+files, and report no existing desktop peer. sendMessage already returns
+false when isClient is false. Preserve the supplied application identifier
+and leave every native platform path intact.
+
+diff --git a/libs/ui/qtsingleapplication/qtlocalpeer.cpp b/libs/ui/qtsingleapplication/qtlocalpeer.cpp
+--- a/libs/ui/qtsingleapplication/qtlocalpeer.cpp
++++ b/libs/ui/qtsingleapplication/qtlocalpeer.cpp
+@@ -34,6 +34,12 @@
+ QtLocalPeer::QtLocalPeer(QObject* parent, const QString &appId)
+     : QObject(parent), id(appId)
+ {
++#ifdef Q_OS_WASM
++    // Browser instances have separate filesystems and no native local sockets.
++    if (id.isEmpty())
++        id = QCoreApplication::applicationFilePath();
++    server = nullptr;
++#else
+     QString prefix = id;
+     if (id.isEmpty()) {
+         id = QCoreApplication::applicationFilePath();
+@@ -70,12 +76,17 @@
+                        + QLatin1String("-lockfile");
+     lockFile.setFileName(lockName);
+     lockFile.open(QIODevice::ReadWrite);
++#endif
+ }
+ 
+ 
+ 
+ bool QtLocalPeer::isClient()
+ {
++#ifdef Q_OS_WASM
++    // Every browser tab runs independently; there is no desktop peer to find.
++    return false;
++#else
+     if (lockFile.isLocked())
+         return false;
+ 
+@@ -94,6 +105,7 @@
+         qWarning("QtSingleCoreApplication: listen on local socket failed, %s", qPrintable(server->errorString()));
+     QObject::connect(server, SIGNAL(newConnection()), SLOT(receiveConnection()));
+     return false;
++#endif
+ }
+ 
+ 

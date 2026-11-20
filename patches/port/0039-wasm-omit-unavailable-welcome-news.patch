@@ -1,0 +1,56 @@
+Subject: [PATCH] Omit desktop news and update controls on WebAssembly
+
+The desktop feed UI cannot be used with the browser's cross-origin rules.
+Hide its entire column and skip feed language/action/update initialization
+on Wasm, even when an existing configuration enables FetchNews. Keep the
+other welcome-page actions and all desktop behavior unchanged.
+
+diff --git a/libs/ui/KisWelcomePageWidget.cpp b/libs/ui/KisWelcomePageWidget.cpp
+--- a/libs/ui/KisWelcomePageWidget.cpp
++++ b/libs/ui/KisWelcomePageWidget.cpp
+@@ -156,6 +156,9 @@
+     recentDocumentsListView->setContextMenuPolicy(Qt::CustomContextMenu);
+     connect(recentDocumentsListView, SIGNAL(customContextMenuRequested(QPoint)), SLOT(slotRecentDocContextMenuRequest(QPoint)));
+ 
++    labelSupportText->setFont(largerFont());
++
++#ifndef Q_OS_WASM
+     // News widget...
+     QMenu *newsOptionsMenu = new QMenu(this);
+     newsOptionsMenu->setToolTipsVisible(true);
+@@ -171,8 +174,6 @@
+     setupNewsLangSelection(newsOptionsMenu);
+     btnNewsOptions->setMenu(newsOptionsMenu);
+ 
+-    labelSupportText->setFont(largerFont());
+-
+     connect(showNewsAction, SIGNAL(toggled(bool)), newsWidget, SLOT(setVisible(bool)));
+     connect(showNewsAction, SIGNAL(toggled(bool)), labelNoFeed, SLOT(setHidden(bool)));
+     connect(showNewsAction, SIGNAL(toggled(bool)), newsWidget, SLOT(toggleNews(bool)));
+@@ -181,6 +182,7 @@
+ #ifdef ENABLE_UPDATERS
+     connect(showNewsAction, SIGNAL(toggled(bool)), this, SLOT(slotToggleUpdateChecks(bool)));
+ #endif
++#endif
+ 
+     supporterBadge->hide();
+     wdgAndroidSupportBanner->hide();
+@@ -188,6 +190,10 @@
+     initDonations();
+ #endif
+ 
++#ifdef Q_OS_WASM
++    // Browser builds cannot fetch the desktop feeds or use its updater.
++    widgetRight->hide();
++#else
+     // configure the News area
+     KisConfig cfg(true);
+     m_networkIsAllowed = cfg.readEntry<bool>("FetchNews", false);
+@@ -239,6 +245,7 @@
+     showNewsAction->setChecked(m_networkIsAllowed);
+     newsWidget->setVisible(m_networkIsAllowed);
+     versionNotificationLabel->setEnabled(m_networkIsAllowed);
++#endif
+ 
+     // Drop area..
+     setAcceptDrops(true);

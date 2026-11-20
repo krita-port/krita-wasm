@@ -1,0 +1,143 @@
+diff --git a/krita/CMakeLists.txt b/krita/CMakeLists.txt
+--- a/krita/CMakeLists.txt
++++ b/krita/CMakeLists.txt
+@@ -211,7 +211,8 @@
+         message(FATAL_ERROR "Set KRITA_WASM_GLUE_DIR to the port repository's src")
+     endif()
+     qt_add_executable(krita ${krita_SRCS} "${KRITA_WASM_GLUE_DIR}/browser_status.cpp" "${KRITA_WASM_GLUE_DIR}/i18n.cpp" "${KRITA_WASM_GLUE_DIR}/browser_files.cpp")
+-    set_property(TARGET krita APPEND PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS ENV)
++    set_property(TARGET krita PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS "ENV,IDBFS,addRunDependency,removeRunDependency")
++    target_link_libraries(krita PRIVATE "-lidbfs.js")
+     get_property(wasm_plugins GLOBAL PROPERTY KRITA_WASM_PLUGIN_TARGETS)
+     target_link_libraries(krita PRIVATE kritaqmlcomponents)
+     # QML is embedded in plugin libraries outside the executable's source
+diff --git a/libs/ui/KisAutoSaveRecoveryDialog.cpp b/libs/ui/KisAutoSaveRecoveryDialog.cpp
+--- a/libs/ui/KisAutoSaveRecoveryDialog.cpp
++++ b/libs/ui/KisAutoSaveRecoveryDialog.cpp
+@@ -273,6 +273,9 @@
+ 
+ QString KisAutoSaveRecoveryDialog::autoSaveLocation()
+ {
++#ifdef Q_OS_WASM
++    return QString::fromUtf8(qgetenv("KRITA_WASM_RECOVERY_DIR"));
++#endif
+ #if defined(Q_OS_WIN)
+     // On Windows, use the temp location (https://bugs.kde.org/show_bug.cgi?id=314921)
+     return QDir::tempPath();
+diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
+--- a/libs/ui/KisDocument.cpp
++++ b/libs/ui/KisDocument.cpp
+@@ -1082,12 +1082,26 @@
+ 
+ 
+         if (!(job.flags & KritaUtils::SaveIsExporting)) {
++#ifndef Q_OS_WASM
+             const QString existingAutoSaveBaseName = localFilePath();
+             const bool wasRecovered = isRecovered();
++#endif
+ 
+             d->updateDocumentMetadataOnSaving(job.filePath, job.mimeType);
+ 
++#ifdef Q_OS_WASM
++            // A completed VFS save is not confirmation of a browser download.
++            if (job.mimeType == nativeFormatMimeType()) {
++                extern void kritaWasmKeepSavedRecovery(const QString &, const QString &);
++                kritaWasmKeepSavedRecovery(job.filePath, generateAutoSaveFileName(QString()));
++            } else {
++                // Preserve native layers even when Save writes a flattened format.
++                setProperty("kritaWasmRecoveryAfterSave", true);
++                QTimer::singleShot(0, this, SLOT(slotAutoSave()));
++            }
++#else
+             removeAutoSaveFiles(existingAutoSaveBaseName, wasRecovered);
++#endif
+         }
+ 
+         Q_EMIT completed();
+@@ -1531,7 +1545,13 @@
+ 
+ void KisDocument::slotAutoSaveImpl(std::unique_ptr<KisDocument> &&optionalClonedDocument)
+ {
+-    if (!d->modified || !d->modifiedAfterAutosave) return;
++    if (!d->modified || !d->modifiedAfterAutosave) {
++#ifdef Q_OS_WASM
++        if (!property("kritaWasmRecoveryAfterSave").toBool()) return;
++#else
++        return;
++#endif
++    }
+     const QString autoSaveFileName = generateAutoSaveFileName(localFilePath());
+ 
+     Q_EMIT statusBarMessage(i18n("Autosaving... %1", autoSaveFileName), successMessageTimeout);
+@@ -1695,6 +1715,9 @@
+                                     fileName,
+                                     exportErrorToUserMessage(status, errorMessage)), errorMessageTimeout);
+     } else {
++#ifdef Q_OS_WASM
++        setProperty("kritaWasmRecoveryAfterSave", false);
++#endif
+         KisConfig cfg(true);
+         d->autoSaveDelay = cfg.autoSaveInterval();
+ 
+@@ -1894,6 +1917,11 @@
+ 
+ QString KisDocument::generateAutoSaveFileName(const QString & path) const
+ {
++#ifdef Q_OS_WASM
++    // Browser sessions have no distinct desktop PID or persistent source path.
++    extern QString kritaWasmRecoveryFileName(const KisDocument *);
++    return kritaWasmRecoveryFileName(this);
++#endif
+     QString retval;
+ 
+     // Using the extension allows to avoid relying on the mime magic when opening
+@@ -1998,6 +2026,11 @@
+     }
+ 
+     bool ret = openPathInternal(path);
++#ifdef Q_OS_WASM
++    if (ret && (flags & RecoveryFile)) {
++        setProperty("kritaWasmRecoveryPath", path);
++    }
++#endif
+ 
+     if (autosaveOpened || flags & RecoveryFile) {
+         setReadWrite(true); // enable save button
+@@ -2313,6 +2346,10 @@
+             QFile::remove(autosaveBaseName);
+         }
+     }
++#ifdef Q_OS_WASM
++    extern void kritaWasmSyncRecovery();
++    kritaWasmSyncRecovery();
++#endif
+ }
+ 
+ KoUnit KisDocument::unit() const
+diff --git a/libs/ui/KisApplication.cpp b/libs/ui/KisApplication.cpp
+--- a/libs/ui/KisApplication.cpp
++++ b/libs/ui/KisApplication.cpp
+@@ -652,6 +652,12 @@
+         }
+     }
+ 
++#ifdef Q_OS_WASM
++    // Observe saves even while the startup recovery dialog runs its event loop.
++    extern void kritaWasmInitializeFiles();
++    kritaWasmInitializeFiles();
++#endif
++
+     // Check for autosave files that can be restored, if we're not running a batch run (test)
+     if (!d->batchRun) {
+         checkAutosaveFiles();
+@@ -1226,6 +1232,10 @@
+         delete d->autosaveDialog;
+         d->autosaveDialog = nullptr;
+     }
++#ifdef Q_OS_WASM
++    extern void kritaWasmSyncRecovery();
++    kritaWasmSyncRecovery();
++#endif
+ }
+ 
+ bool KisApplication::createNewDocFromTemplate(const QString &fileName, KisMainWindow *mainWindow)

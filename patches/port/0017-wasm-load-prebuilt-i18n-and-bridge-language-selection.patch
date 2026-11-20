@@ -1,0 +1,229 @@
+Subject: [PATCH] Load prebuilt browser translations and preserve language preferences
+
+Keep the ABI-compatible i18n supplement separate from the frozen SDK. Use
+browser runtime paths for Qt catalogs and route language changes through
+the page reload guard instead of a nested message-box event loop.
+
+diff --git a/krita/CMakeLists.txt b/krita/CMakeLists.txt
+--- a/krita/CMakeLists.txt
++++ b/krita/CMakeLists.txt
+@@ -210,7 +210,7 @@
+     if(NOT EXISTS "${KRITA_WASM_GLUE_DIR}/browser_status.cpp")
+         message(FATAL_ERROR "Set KRITA_WASM_GLUE_DIR to the port repository's src")
+     endif()
+-    qt_add_executable(krita ${krita_SRCS} "${KRITA_WASM_GLUE_DIR}/browser_status.cpp")
++    qt_add_executable(krita ${krita_SRCS} "${KRITA_WASM_GLUE_DIR}/browser_status.cpp" "${KRITA_WASM_GLUE_DIR}/i18n.cpp")
+     set_property(TARGET krita APPEND PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS ENV)
+     get_property(wasm_plugins GLOBAL PROPERTY KRITA_WASM_PLUGIN_TARGETS)
+     target_link_libraries(krita PRIVATE kritaqmlcomponents)
+diff --git a/krita/main.cc b/krita/main.cc
+--- a/krita/main.cc
++++ b/krita/main.cc
+@@ -131,6 +131,7 @@
+ #ifdef __EMSCRIPTEN__
+ extern void kritaWasmConfigureThreads();
+ extern void kritaWasmScheduleStatus();
++extern void kritaWasmConfigureFonts();
+ #endif
+ 
+ namespace
+@@ -387,7 +388,11 @@
+         root = KoResourcePaths::getApplicationRoot();
+         QSettings languageoverride(configPath.absoluteFilePath("klanguageoverridesrc"), QSettings::IniFormat);
+         languageoverride.beginGroup("Language");
++#ifdef Q_OS_WASM
++        language = qEnvironmentVariable("KRITA_UI_LANGUAGES");
++#else
+         language = languageoverride.value(qAppName(), "").toString();
++#endif
+     }
+ 
+     bool enableOpenGLDebug = false;
+@@ -547,6 +552,10 @@
+     bool rightToLeft = false;
+     if (!language.isEmpty()) {
+         QStringList languageList = language.split(QStringLiteral(":"));
++#ifdef Q_OS_WASM
++        for (QString &entry : languageList)
++            if (entry == QStringLiteral("en")) entry = QStringLiteral("en_US");
++#endif
+         const QString &firstLanguage = languageList.constFirst();
+         if (ALLOW_FALLBACK_LANGUAGES) {
+             KLocalizedString::setLanguages(languageList);
+@@ -555,7 +564,14 @@
+         }
+ 
+         // And override Qt's locale, too
++#ifdef Q_OS_WASM
++        QString localeName = firstLanguage;
++        localeName.replace(QStringLiteral("@cyrillic"), QStringLiteral("_Cyrl"));
++        localeName.replace(QStringLiteral("@latin"), QStringLiteral("_Latn"));
++        QLocale locale(localeName);
++#else
+         QLocale locale(firstLanguage);
++#endif
+         QLocale::setDefault(locale);
+ #ifdef Q_OS_MAC
+         // prevents python >=3.7 nl_langinfo(CODESET) fail bug 417312.
+@@ -564,12 +580,16 @@
+         qputenv("LANG", locale.name().toLocal8Bit());
+ #endif
+ 
++#ifdef Q_OS_WASM
++        rightToLeft = locale.textDirection() == Qt::RightToLeft;
++#else
+         const QStringList rtlLanguages = QStringList()
+                 << "ar" << "dv" << "he" << "ha" << "ku" << "fa" << "ps" << "ur" << "yi";
+ 
+         if (rtlLanguages.contains(firstLanguage)) {
+             rightToLeft = true;
+         }
++#endif
+     }
+     else {
+         dbgLocale << "Qt UI languages:" << QLocale::system().uiLanguages() << qgetenv("LANG");
+@@ -663,6 +683,9 @@
+ 
+     // first create the application so we can create a pixmap
+     KisApplication app(key, argc, argv);
++#ifdef Q_OS_WASM
++    kritaWasmConfigureFonts();
++#endif
+ 
+ #if defined Q_OS_WIN && QT_VERSION > QT_VERSION_CHECK(6, 0, 0)
+     const bool forceWinTab = !KisConfig::useWin8PointerInputNoApp(&kritarc);
+@@ -959,6 +982,9 @@
+ #else
+     QString translationsPath = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
+ #endif
++#ifdef Q_OS_WASM
++    translationsPath = KoResourcePaths::getApplicationRoot() + QStringLiteral("share/qt/translations");
++#endif
+     dbgLocale << "Qt translations path:" << translationsPath;
+ 
+     Q_FOREACH(const auto &localeToLoad, localeList) {
+@@ -987,6 +1013,9 @@
+ #endif
+     QStringList ecmCatalogs = {
+         QStringLiteral("kcompletion%1_qt").arg(catalogVersion),
++#ifdef Q_OS_WASM
++        QStringLiteral("kcodecs%1_qt").arg(catalogVersion),
++#endif
+         QStringLiteral("kconfig%1_qt").arg(catalogVersion),
+         QStringLiteral("kcoreaddons%1_qt").arg(catalogVersion),
+         QStringLiteral("kitemviews%1_qt").arg(catalogVersion),
+diff --git a/cmake/modules/KritaWasmStaticDependencies.cmake b/cmake/modules/KritaWasmStaticDependencies.cmake
+--- a/cmake/modules/KritaWasmStaticDependencies.cmake
++++ b/cmake/modules/KritaWasmStaticDependencies.cmake
+@@ -1,5 +1,22 @@
+ # Preserve the complete archive link interface of the browser font stack.
+ function(krita_link_wasm_static_dependencies)
++    if(NOT EXISTS "${KRITA_I18N_DIR}/target/lib/libKF6I18n.a")
++        message(FATAL_ERROR "Set KRITA_I18N_DIR to the verified prebuilt i18n supplement")
++    endif()
++    # Retain the frozen base SDK, replacing only its ABI-compatible KI18n
++    # archive with the GNU-gettext/Transcript build from the supplement.
++    get_target_property(i18n_configs KF6::I18n IMPORTED_CONFIGURATIONS)
++    foreach(config IN LISTS i18n_configs)
++        string(TOUPPER "${config}" upper_config)
++        set_property(TARGET KF6::I18n PROPERTY IMPORTED_LOCATION_${upper_config}
++            "${KRITA_I18N_DIR}/target/lib/libKF6I18n.a")
++    endforeach()
++    set_property(TARGET KF6::I18n PROPERTY IMPORTED_LOCATION
++        "${KRITA_I18N_DIR}/target/lib/libKF6I18n.a")
++    target_link_libraries(KF6::I18n INTERFACE
++        "${KRITA_I18N_DIR}/target/lib/libktranscript.a"
++        "${KRITA_I18N_DIR}/target/lib/libintl.a"
++        "$<LINK_ONLY:Qt6::Qml>")
+     find_package(PkgConfig REQUIRED)
+     list(APPEND PKG_CONFIG_ARGN --static)
+     pkg_check_modules(KRITA_WASM_FONT_STACK REQUIRED IMPORTED_TARGET GLOBAL fontconfig harfbuzz freetype2)
+diff --git a/libs/widgetutils/xmlgui/kswitchlanguagedialog_p.cpp b/libs/widgetutils/xmlgui/kswitchlanguagedialog_p.cpp
+--- a/libs/widgetutils/xmlgui/kswitchlanguagedialog_p.cpp
++++ b/libs/widgetutils/xmlgui/kswitchlanguagedialog_p.cpp
+@@ -55,10 +55,18 @@
+ 
+ static QByteArray getApplicationSpecificLanguage(const QByteArray &defaultCode = QByteArray())
+ {
++#ifdef Q_OS_WASM
++    Q_UNUSED(defaultCode);
++    QStringList languages = QString::fromUtf8(qgetenv("KRITA_UI_LANGUAGES")).split(QStringLiteral(":"), Qt::SkipEmptyParts);
++    for (QString &entry : languages)
++        if (entry == QStringLiteral("en")) entry = QStringLiteral("en_US");
++    return languages.join(QStringLiteral(":")).toUtf8();
++#else
+     QSettingsPtr settings = localeOverridesSettings();
+     settings->beginGroup(QStringLiteral("Language"));
+     //qDebug() << "our language" << settings->value(qAppName(), defaultCode).toByteArray();
+     return settings->value(qAppName(), defaultCode).toByteArray();
++#endif
+ }
+ 
+ static void setApplicationSpecificLanguage(const QByteArray &languageCode)
+@@ -94,6 +102,10 @@
+ 
+ Q_COREAPP_STARTUP_FUNCTION(initializeLanguages)
+ 
++#ifdef Q_OS_WASM
++extern void kritaWasmRequestLanguages(const QStringList &languages);
++#endif
++
+ namespace KDEPrivate
+ {
+ 
+@@ -279,11 +291,15 @@
+     if (d->applicationLanguageList() != languages) {
+         QString languageString = languages.join(QLatin1Char(':'));
+         //list is different from defaults or saved languages list
++#ifdef Q_OS_WASM
++        kritaWasmRequestLanguages(languages);
++#else
+         setApplicationSpecificLanguage(languageString.toLatin1());
+ 
+         QMessageBox::information(this,
+                                  i18nc("@title:window:", "Application Language Changed"), //caption
+                                  i18n("The language for this application has been changed. The change will take effect the next time the application is started."));
++#endif
+     }
+ 
+     accept();
+@@ -291,7 +307,11 @@
+ 
+ void KisKSwitchLanguageDialog::slotDefault()
+ {
++#ifdef Q_OS_WASM
++    kritaWasmRequestLanguages(QStringList());
++#else
+     setApplicationSpecificLanguage(QByteArray());
++#endif
+     accept();
+ }
+ 
+@@ -316,6 +336,19 @@
+ 
+ void KisKSwitchLanguageDialogPrivate::fillApplicationLanguages(KLanguageButton *button)
+ {
++#ifdef Q_OS_WASM
++    QStringList languages = KLocalizedString::availableApplicationTranslations().values();
++    languages.sort();
++    for (const QString &code : languages) {
++        QString localeName = code;
++        localeName.replace(QStringLiteral("@cyrillic"), QStringLiteral("_Cyrl"));
++        localeName.replace(QStringLiteral("@latin"), QStringLiteral("_Latn"));
++        const QLocale locale(localeName);
++        QString name = locale.nativeLanguageName();
++        if (name.isEmpty() || locale.language() == QLocale::C) name = code;
++        button->insertLanguage(code, name + QStringLiteral(" (") + code + QLatin1Char(')'));
++    }
++#else
+     QLocale defaultLocale;
+     QLocale cLocale(QLocale::C);
+     QLocale::setDefault(cLocale);
+@@ -369,6 +402,7 @@
+     }
+ 
+     QLocale::setDefault(defaultLocale);
++#endif
+ }
+ 
+ QStringList KisKSwitchLanguageDialogPrivate::applicationLanguageList()

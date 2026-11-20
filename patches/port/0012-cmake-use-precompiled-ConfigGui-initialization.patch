@@ -1,0 +1,28 @@
+Subject: [PATCH] Consume precompiled ConfigGui initialization from stage-2 SDK
+
+The frozen stage-2 archive already contains the GUI conversion constructor.
+Remove its redundant exported consumer source and retain the existing object
+at the final link. This compatibility path does not modify the imported SDK.
+
+diff --git a/cmake/modules/KritaWasmStaticDependencies.cmake b/cmake/modules/KritaWasmStaticDependencies.cmake
+--- a/cmake/modules/KritaWasmStaticDependencies.cmake
++++ b/cmake/modules/KritaWasmStaticDependencies.cmake
+@@ -7,4 +7,18 @@
+     foreach(target Fontconfig::Fontconfig HarfBuzz::HarfBuzz Freetype::Freetype)
+         set_property(TARGET ${target} APPEND PROPERTY INTERFACE_LINK_LIBRARIES PkgConfig::KRITA_WASM_FONT_STACK)
+     endforeach()
++    # stage-2 exports a source initializer although its implementation and
++    # constructor are already in libKF6ConfigGui.a. Consume that prebuilt code.
++    # Newer SDKs carry this link option directly and need no compatibility fix.
++    if(TARGET KF6::ConfigGui)
++        get_target_property(gui_sources KF6::ConfigGui INTERFACE_SOURCES)
++        if(gui_sources)
++            set(remaining_sources ${gui_sources})
++            list(FILTER remaining_sources EXCLUDE REGEX "/kconfigguistaticinitializer\\.cpp$")
++            if(NOT "${remaining_sources}" STREQUAL "${gui_sources}")
++                set_property(TARGET KF6::ConfigGui PROPERTY INTERFACE_SOURCES "${remaining_sources}")
++                target_link_options(KF6::ConfigGui INTERFACE "LINKER:--undefined=_Z19initKConfigGroupGuiv")
++            endif()
++        endif()
++    endif()
+ endfunction()

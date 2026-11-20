@@ -1,0 +1,178 @@
+Subject: [PATCH] Resolve static module collisions and retain Qt resources
+
+Factor shared QObject converters once, distinguish the private artistic
+selector class, make header-defined helpers inline, and anchor archive
+resources. Give the two different defaulttools resource collections unique
+internal names without changing their runtime paths.
+
+diff --git a/plugins/dockers/artisticcolorselector/CMakeLists.txt b/plugins/dockers/artisticcolorselector/CMakeLists.txt
+--- a/plugins/dockers/artisticcolorselector/CMakeLists.txt
++++ b/plugins/dockers/artisticcolorselector/CMakeLists.txt
+@@ -14,3 +14,8 @@
+ kis_add_library(kritaartisticcolorselector MODULE ${kritaartisticcolorselector_SOURCES})
+ target_link_libraries(kritaartisticcolorselector kritaui)
+ install(TARGETS kritaartisticcolorselector DESTINATION ${KRITA_PLUGIN_INSTALL_DIR})
++
++if(EMSCRIPTEN)
++    # The advanced selector has an unrelated private class with this name.
++    target_compile_definitions(kritaartisticcolorselector PRIVATE KisColorSelector=KisArtisticColorSelector)
++endif()
+diff --git a/plugins/impex/ora/CMakeLists.txt b/plugins/impex/ora/CMakeLists.txt
+--- a/plugins/impex/ora/CMakeLists.txt
++++ b/plugins/impex/ora/CMakeLists.txt
+@@ -31,3 +31,13 @@
+ install(TARGETS kritaoraexport  DESTINATION ${KRITA_PLUGIN_INSTALL_DIR})
+ 
+ install(FILES krita_ora.desktop DESTINATION ${KDE_INSTALL_APPDIR})
++
++if(EMSCRIPTEN)
++    # Shared QObject implementation must have exactly one moc in the program.
++    kis_add_library(kritaoraconverter STATIC ${libkritaconverter_LIB_SRCS})
++    target_link_libraries(kritaoraconverter PUBLIC kritaui)
++    set_property(TARGET kritaoraimport PROPERTY SOURCES ora_import.cc)
++    set_property(TARGET kritaoraexport PROPERTY SOURCES ora_export.cc)
++    target_link_libraries(kritaoraimport kritaoraconverter)
++    target_link_libraries(kritaoraexport kritaoraconverter)
++endif()
+diff --git a/plugins/impex/heightmap/CMakeLists.txt b/plugins/impex/heightmap/CMakeLists.txt
+--- a/plugins/impex/heightmap/CMakeLists.txt
++++ b/plugins/impex/heightmap/CMakeLists.txt
+@@ -31,3 +31,14 @@
+ install(TARGETS kritaheightmapexport  DESTINATION ${KRITA_PLUGIN_INSTALL_DIR})
+ 
+ install(FILES krita_heightmap.desktop DESTINATION ${KDE_INSTALL_APPDIR})
++
++if(EMSCRIPTEN)
++    set(heightmap_common_sources ${kritaheightmapimport_SOURCES})
++    list(REMOVE_ITEM heightmap_common_sources kis_heightmap_import.cpp)
++    kis_add_library(kritaheightmapcommon STATIC ${heightmap_common_sources})
++    target_link_libraries(kritaheightmapcommon PUBLIC kritaui)
++    set_property(TARGET kritaheightmapimport PROPERTY SOURCES kis_heightmap_import.cpp)
++    set_property(TARGET kritaheightmapexport PROPERTY SOURCES kis_heightmap_export.cpp)
++    target_link_libraries(kritaheightmapimport kritaheightmapcommon)
++    target_link_libraries(kritaheightmapexport kritaheightmapcommon)
++endif()
+diff --git a/plugins/paintops/libpaintop/kis_paintop_plugin_utils.h b/plugins/paintops/libpaintop/kis_paintop_plugin_utils.h
+--- a/plugins/paintops/libpaintop/kis_paintop_plugin_utils.h
++++ b/plugins/paintops/libpaintop/kis_paintop_plugin_utils.h
+@@ -38,7 +38,7 @@
+  * @param pi - The paint information.
+  * @see KisPaintInformation
+  */
+-KisSpacingInformation effectiveSpacing(qreal dabWidth,
++inline KisSpacingInformation effectiveSpacing(qreal dabWidth,
+                                        qreal dabHeight,
+                                        bool isotropicSpacing,
+                                        qreal rotation,
+@@ -79,7 +79,7 @@
+  * @param pi - The paint information.
+  * @see KisPaintInformation
+  */
+-KisTimingInformation effectiveTiming(const KisAirbrushOptionData *airbrushOption,
++inline KisTimingInformation effectiveTiming(const KisAirbrushOptionData *airbrushOption,
+                                      const KisRateOption *rateOption,
+                                      const KisPaintInformation &pi)
+ {
+diff --git a/plugins/tools/defaulttool/CMakeLists.txt b/plugins/tools/defaulttool/CMakeLists.txt
+--- a/plugins/tools/defaulttool/CMakeLists.txt
++++ b/plugins/tools/defaulttool/CMakeLists.txt
+@@ -27,7 +27,7 @@
+     referenceimagestool/WdgToolOptions.ui
+ )
+ 
+-qt_add_resources(defaulttools_SRCS defaulttools.qrc)
++qt_add_resources(defaulttools_SRCS flaketools.qrc)
+ 
+ kis_add_library(krita_flaketools MODULE ${defaulttools_SRCS})
+ target_link_libraries(krita_flaketools kritaflake kritawidgets kritaui)
+diff --git a/plugins/tools/defaulttool/defaulttools.qrc b/plugins/tools/defaulttool/defaulttools.qrc
+deleted file mode 100644
+--- a/plugins/tools/defaulttool/defaulttools.qrc
++++ /dev/null
+@@ -1,19 +0,0 @@
+-<!DOCTYPE RCC>
+-<!--
+-  SPDX-FileCopyrightText: none
+-  SPDX-License-Identifier: CC0-1.0
+--->
+-<RCC version="1.0">
+-    <qresource>
+-       <file alias="escape-direction-all.png">pics/16-actions-escape-direction-all.png</file>
+-       <file alias="escape-direction-down.png">pics/16-actions-escape-direction-down.png</file>
+-       <file alias="escape-direction-horizontal.png">pics/16-actions-escape-direction-horizontal.png</file>
+-       <file alias="escape-direction-left.png">pics/16-actions-escape-direction-left.png</file>
+-       <file alias="escape-direction-right.png">pics/16-actions-escape-direction-right.png</file>
+-       <file alias="escape-direction-up.png">pics/16-actions-escape-direction-up.png</file>
+-       <file alias="escape-direction-vertical.png">pics/16-actions-escape-direction-vertical.png</file>
+-       <file alias="cursor_connect.png">pics/cursor_connect.png</file>
+-       <file alias="cursor_rotate.png">pics/cursor_rotate.png</file>
+-       <file alias="cursor_shear.png">pics/cursor_shear.png</file>
+-    </qresource>
+-</RCC>
+diff --git a/plugins/tools/defaulttool/flaketools.qrc b/plugins/tools/defaulttool/flaketools.qrc
+new file mode 100644
+--- /dev/null
++++ b/plugins/tools/defaulttool/flaketools.qrc
+@@ -0,0 +1,19 @@
++<!DOCTYPE RCC>
++<!--
++  SPDX-FileCopyrightText: none
++  SPDX-License-Identifier: CC0-1.0
++-->
++<RCC version="1.0">
++    <qresource>
++       <file alias="escape-direction-all.png">pics/16-actions-escape-direction-all.png</file>
++       <file alias="escape-direction-down.png">pics/16-actions-escape-direction-down.png</file>
++       <file alias="escape-direction-horizontal.png">pics/16-actions-escape-direction-horizontal.png</file>
++       <file alias="escape-direction-left.png">pics/16-actions-escape-direction-left.png</file>
++       <file alias="escape-direction-right.png">pics/16-actions-escape-direction-right.png</file>
++       <file alias="escape-direction-up.png">pics/16-actions-escape-direction-up.png</file>
++       <file alias="escape-direction-vertical.png">pics/16-actions-escape-direction-vertical.png</file>
++       <file alias="cursor_connect.png">pics/cursor_connect.png</file>
++       <file alias="cursor_rotate.png">pics/cursor_rotate.png</file>
++       <file alias="cursor_shear.png">pics/cursor_shear.png</file>
++    </qresource>
++</RCC>
+diff --git a/cmake/modules/KritaWasmTargets.cmake b/cmake/modules/KritaWasmTargets.cmake
+--- a/cmake/modules/KritaWasmTargets.cmake
++++ b/cmake/modules/KritaWasmTargets.cmake
+@@ -42,6 +42,22 @@
+         endif()
+         add_library(${args})
+     endif()
++    # Classic qt_add_resources output is just another archive member. Anchor
++    # its initializer explicitly, as well as the plugin factory itself.
++    get_target_property(sources ${target} SOURCES)
++    foreach(source IN LISTS sources)
++        get_filename_component(name "${source}" NAME_WE)
++        if(name MATCHES "^qrc_(.+)$")
++            string(REGEX REPLACE "[^A-Za-z0-9_]" "_" resource "${CMAKE_MATCH_1}")
++            get_filename_component(path "${source}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
++            get_property(previous GLOBAL PROPERTY "KRITA_WASM_RESOURCE_SOURCE_${resource}")
++            if(previous AND NOT previous STREQUAL path)
++                message(FATAL_ERROR "Static resource name collision ${resource}: ${previous} and ${path}")
++            endif()
++            set_property(GLOBAL PROPERTY "KRITA_WASM_RESOURCE_SOURCE_${resource}" "${path}")
++            set_property(GLOBAL APPEND PROPERTY KRITA_WASM_RESOURCES "${resource}")
++        endif()
++    endforeach()
+ endfunction()
+ 
+ # Keep imports in an executable object so archive dead stripping cannot discard
+@@ -55,6 +71,16 @@
+         endif()
+         string(APPEND imports "Q_IMPORT_PLUGIN(${factory})\n")
+     endforeach()
++    get_property(resources GLOBAL PROPERTY KRITA_WASM_RESOURCES)
++    if(resources)
++        list(REMOVE_DUPLICATES resources)
++        list(SORT resources)
++        string(APPEND imports "\n#include <QResource>\nstatic void kritaWasmInitResources()\n{\n")
++        foreach(resource IN LISTS resources)
++            string(APPEND imports "    Q_INIT_RESOURCE(${resource});\n")
++        endforeach()
++        string(APPEND imports "}\nQ_CONSTRUCTOR_FUNCTION(kritaWasmInitResources)\n")
++    endif()
+     set(source "${CMAKE_CURRENT_BINARY_DIR}/${target}_wasm_plugins.cpp")
+     file(GENERATE OUTPUT "${source}" CONTENT "${imports}")
+     target_sources(${target} PRIVATE "${source}")

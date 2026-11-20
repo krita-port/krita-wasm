@@ -1,0 +1,24 @@
+Subject: [PATCH] Offer device download when saving an unchanged cached file
+
+Desktop Save intentionally skips unmodified documents. In the browser,
+the user may still need the existing saved bytes on their device. Reuse
+the normal save preflight so pending image work completes before deciding
+whether the document is unchanged. Save As and recovery keep their native
+paths; no document serialization or cache rewrite is needed for this copy.
+
+diff --git a/libs/ui/KisMainWindow.cpp b/libs/ui/KisMainWindow.cpp
+--- a/libs/ui/KisMainWindow.cpp
++++ b/libs/ui/KisMainWindow.cpp
+@@ -1552,6 +1552,12 @@
+         if (document->isModified()) {
+             ret = document->save(true, 0);
+         }
++#ifdef Q_OS_WASM
++        else {
++            extern bool kritaWasmOfferUnmodifiedDownload(KisDocument *);
++            ret = kritaWasmOfferUnmodifiedDownload(document);
++        }
++#endif
+ 
+         if (!ret) {
+             dbgUI << "Failed Save!";

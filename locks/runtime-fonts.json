@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "name": "noto-sans-cjk",
+  "version": "2.004",
+  "release_url": "https://github.com/notofonts/noto-cjk/releases/tag/Sans2.004",
+  "source": {
+    "repository": "https://github.com/notofonts/noto-cjk.git",
+    "tag": "Sans2.004",
+    "commit": "523d033d6cb47f4a80c58a35753646f5c3608a78"
+  },
+  "archive": {
+    "filename": "NotoSansCJK-OTC-2.004.zip",
+    "url": "https://github.com/notofonts/noto-cjk/releases/download/Sans2.004/03_NotoSansCJK-OTC.zip",
+    "sha256": "528f4e1b25ff3badb0321b38d015d954c4c0de926c7830ef50e4a1948f6a3eed"
+  },
+  "files": [
+    {
+      "member": "NotoSansCJK-Regular.ttc",
+      "path": "fonts/NotoSansCJK-Regular.ttc",
+      "destination": "/fonts/NotoSansCJK-Regular.ttc",
+      "sha256": "b76b0433203017ca80401b2ee0dd69350349871c4b19d504c34dbdd80541690a"
+    },
+    {
+      "member": "LICENSE",
+      "path": "licenses/NotoSansCJK-OFL.txt",
+      "destination": "/krita/share/licenses/runtime-fonts/NotoSansCJK-OFL.txt",
+      "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+From: krita.js contributors
+Subject: [PATCH] plugins: discover registered static Qt plugin factories
+
+Add a static discovery path selected by KRITA_STATIC_PLUGINS, retaining
+service/MIME metadata filtering and KoPluginLoader factory semantics.
+Default native builds keep file-based discovery. Static entries own only
+the QStaticPlugin descriptor; factory singleton ownership stays with Qt.
+
+Applies to: Krita v6.0.4.1
+Upstream status: local Wasm porting patch, not submitted
+
+diff --git a/libs/koplugin/KoJsonTrader.h b/libs/koplugin/KoJsonTrader.h
+--- a/libs/koplugin/KoJsonTrader.h
++++ b/libs/koplugin/KoJsonTrader.h
+@@ -16,6 +16,7 @@
+ #include "kritaplugin_export.h"
+ 
+ class QPluginLoader;
++struct QStaticPlugin;
+ 
+ /**
+  * Support class to fetch a list of relevant plugins
+@@ -34,6 +35,7 @@
+     struct KRITAPLUGIN_EXPORT Plugin {
+         Plugin() = default;
+         Plugin(QSharedPointer<QPluginLoader> loader, QMutex *mutex);
++        Plugin(const QStaticPlugin &plugin, QMutex *mutex);
+         ~Plugin();
+ 
+         QObject *instance() const;
+@@ -44,6 +46,7 @@
+ 
+     private:
+         QSharedPointer<QPluginLoader> m_loader;
++        QSharedPointer<QStaticPlugin> m_staticPlugin;
+         QMutex *m_mutex = 0;
+     };
+ 
+diff --git a/libs/koplugin/KoJsonTrader.cpp b/libs/koplugin/KoJsonTrader.cpp
+--- a/libs/koplugin/KoJsonTrader.cpp
++++ b/libs/koplugin/KoJsonTrader.cpp
+@@ -27,11 +27,13 @@
+     QJsonArray serviceTypes;
+     QStringList mimeTypes;
+     QSharedPointer<QPluginLoader> loader;
++    QSharedPointer<QStaticPlugin> staticPlugin;
+ };
+ 
+ 
+ KoJsonTrader::KoJsonTrader()
+ {
++#ifndef KRITA_STATIC_PLUGINS
+     // Allow a command line variable KRITA_PLUGIN_PATH to override the automatic search
+     m_pluginPath = QProcessEnvironment::systemEnvironment().value("KRITA_PLUGIN_PATH");
+ 
+@@ -117,6 +119,7 @@
+         dbgPlugins << "KoJsonTrader will load its plugins from" << m_pluginPath;
+     }
+ 
++#endif
+     initializePluginLoaderCache();
+ }
+ 
+@@ -138,6 +141,25 @@
+ 
+     KIS_SAFE_ASSERT_RECOVER_RETURN(m_pluginLoaderCache.isEmpty());
+ 
++#ifdef KRITA_STATIC_PLUGINS
++    // Static Qt/KDE plugins have metadata and factories but no library file.
++    // Ignore platform/image plugins without a Krita service type.
++    for (const QStaticPlugin &plugin : QPluginLoader::staticPlugins()) {
++        const QJsonObject json = plugin.metaData().value("MetaData").toObject();
++        const QJsonArray serviceTypes = json.value("X-KDE-ServiceTypes").toArray();
++        if (serviceTypes.isEmpty()) {
++            continue;
++        }
++
++        PluginCacheEntry entry;
++        entry.serviceTypes = serviceTypes;
++        entry.mimeTypes = json.value("X-KDE-ExtraNativeMimeTypes").toString().split(',');
++        entry.mimeTypes += json.value("MimeType").toString().split(';');
++        entry.mimeTypes += json.value("X-KDE-NativeMimeType").toString();
++        entry.staticPlugin.reset(new QStaticPlugin(plugin));
++        m_pluginLoaderCache << entry;
++    }
++#else
+     QList<QPluginLoader *>list;
+     QDirIterator dirIter(m_pluginPath, QDirIterator::Subdirectories);
+     while (dirIter.hasNext()) {
+@@ -180,6 +202,7 @@
+             }
+         }
+     }
++#endif
+ }
+ 
+ QList<KoJsonTrader::Plugin> KoJsonTrader::query(const QString &servicetype, const QString &mimetype)
+@@ -196,7 +219,11 @@
+             continue;
+         }
+ 
+-        list << Plugin(plugin.loader, &m_mutex);
++        if (plugin.staticPlugin) {
++            list << Plugin(*plugin.staticPlugin, &m_mutex);
++        } else {
++            list << Plugin(plugin.loader, &m_mutex);
++        }
+     }
+ 
+     return list;
+@@ -208,6 +235,12 @@
+ {
+ }
+ 
++KoJsonTrader::Plugin::Plugin(const QStaticPlugin &plugin, QMutex *mutex)
++    : m_staticPlugin(new QStaticPlugin(plugin)),
++      m_mutex(mutex)
++{
++}
++
+ KoJsonTrader::Plugin::~Plugin()
+ {
+ }
+@@ -215,20 +248,22 @@
+ QObject *KoJsonTrader::Plugin::instance() const
+ {
+     QMutexLocker l(m_mutex);
+-    return m_loader->instance();
++    return m_staticPlugin ? m_staticPlugin->instance() : m_loader->instance();
+ }
+ 
+ QJsonObject KoJsonTrader::Plugin::metaData() const
+ {
+-    return m_loader->metaData();
++    return m_staticPlugin ? m_staticPlugin->metaData() : m_loader->metaData();
+ }
+ 
+ QString KoJsonTrader::Plugin::fileName() const
+ {
+-    return m_loader->fileName();
++    return m_staticPlugin
++        ? QStringLiteral("static:") + m_staticPlugin->metaData().value("className").toString()
++        : m_loader->fileName();
+ }
+ 
+ QString KoJsonTrader::Plugin::errorString() const
+ {
+-    return m_loader->errorString();
+-}
++    return m_staticPlugin ? QString() : m_loader->errorString();
++}

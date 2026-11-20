@@ -1,0 +1,247 @@
+Subject: [PATCH] Build static Wasm libraries and register unique KDE factories
+
+Use Qt executable targets and explicit plugin imports, retain static plugin
+archives, and give every KDE factory a target-specific Qt plugin name.
+Three private generic Plugin implementations also need distinct class names
+when their archives are linked into one program. Native target types stay
+unchanged. Do not build desktop version CLI or test fixtures in this profile.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1063,11 +1063,20 @@
+     endif()
+ endfunction()
+ 
++if(EMSCRIPTEN)
++    include(KritaWasmTargets)
++    add_compile_definitions(KRITA_STATIC_PLUGINS)
++endif()
++
+ macro(kis_add_library)
+     # the first run strips only options specific to kis_add_library
+     # to create arguments for real add_library call
+     cmake_parse_arguments(REAL "" PCH_FILE "" ${ARGV} )
+-    add_library(${REAL_UNPARSED_ARGUMENTS})
++    if(EMSCRIPTEN)
++        krita_wasm_add_library(${REAL_UNPARSED_ARGUMENTS})
++    else()
++        add_library(${REAL_UNPARSED_ARGUMENTS})
++    endif()
+ 
+     if (KRITA_ENABLE_PCH)
+         # the second run strips out all the option supported by the function
+diff --git a/cmake/modules/KritaWasmTargets.cmake b/cmake/modules/KritaWasmTargets.cmake
+new file mode 100644
+--- /dev/null
++++ b/cmake/modules/KritaWasmTargets.cmake
+@@ -0,0 +1,61 @@
++# Krita's modules become static Qt plugins in the browser. Factories are
++# private to each module, so their exported Qt plugin names must be unique.
++function(krita_wasm_add_library)
++    set(args ${ARGV})
++    list(GET args 0 target)
++    list(FIND args MODULE module_index)
++    if(module_index GREATER -1)
++        list(REMOVE_AT args ${module_index})
++        list(REMOVE_AT args 0)
++        set(factories)
++        foreach(source IN LISTS args)
++            get_filename_component(path "${source}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
++            if(EXISTS "${path}" AND NOT IS_DIRECTORY "${path}")
++                file(READ "${path}" contents)
++                string(REGEX MATCHALL "K_PLUGIN_FACTORY_WITH_JSON[ \t\r\n]*\\([ \t\r\n]*[A-Za-z_][A-Za-z0-9_]*" declarations "${contents}")
++                foreach(declaration IN LISTS declarations)
++                    string(REGEX REPLACE ".*\\([ \t\r\n]*" "" factory "${declaration}")
++                    list(APPEND factories "${factory}")
++                endforeach()
++            endif()
++        endforeach()
++        list(REMOVE_DUPLICATES factories)
++        list(LENGTH factories count)
++        if(NOT count EQUAL 1)
++            message(FATAL_ERROR "Static Krita plugin ${target}: expected one KDE factory, got ${factories}")
++        endif()
++        list(GET factories 0 original_factory)
++        string(MAKE_C_IDENTIFIER "KritaWasm_${target}_Factory" factory)
++        add_library(${target} STATIC ${args})
++        target_compile_definitions(${target} PRIVATE QT_STATICPLUGIN "${original_factory}=${factory}")
++        set_property(TARGET ${target} PROPERTY KRITA_WASM_FACTORY "${factory}")
++        # Test-only modules are not application plugins.
++        if(CMAKE_CURRENT_SOURCE_DIR MATCHES "[/\\]plugins([/\\]|$)")
++            set_property(GLOBAL APPEND PROPERTY KRITA_WASM_PLUGIN_TARGETS ${target})
++        endif()
++    else()
++        list(FIND args SHARED shared_index)
++        if(shared_index GREATER -1)
++            list(REMOVE_AT args ${shared_index})
++            list(INSERT args ${shared_index} STATIC)
++        endif()
++        add_library(${args})
++    endif()
++endfunction()
++
++# Keep imports in an executable object so archive dead stripping cannot discard
++# plugin factories. Use each target's actual, unique class name.
++function(krita_wasm_import_plugins target)
++    set(imports "#include <QPluginLoader>\n")
++    foreach(plugin IN LISTS ARGN)
++        get_target_property(factory ${plugin} KRITA_WASM_FACTORY)
++        if(NOT factory)
++            message(FATAL_ERROR "Missing static factory for ${plugin}")
++        endif()
++        string(APPEND imports "Q_IMPORT_PLUGIN(${factory})\n")
++    endforeach()
++    set(source "${CMAKE_CURRENT_BINARY_DIR}/${target}_wasm_plugins.cpp")
++    file(GENERATE OUTPUT "${source}" CONTENT "${imports}")
++    target_sources(${target} PRIVATE "${source}")
++    target_link_libraries(${target} PRIVATE ${ARGN})
++endfunction()
+diff --git a/krita/CMakeLists.txt b/krita/CMakeLists.txt
+--- a/krita/CMakeLists.txt
++++ b/krita/CMakeLists.txt
+@@ -206,6 +206,13 @@
+     # Build the main implementation into a DLL to be called by a stub EXE.
+     kis_add_library(krita SHARED ${krita_SRCS})
+     set_target_properties(krita PROPERTIES PREFIX "")
++elseif(EMSCRIPTEN)
++    qt_add_executable(krita ${krita_SRCS})
++    get_property(wasm_plugins GLOBAL PROPERTY KRITA_WASM_PLUGIN_TARGETS)
++    target_link_libraries(krita PRIVATE kritaqmlcomponents)
++    krita_wasm_import_plugins(krita ${wasm_plugins})
++    set_target_properties(krita PROPERTIES QT_WASM_EXPORT_NAME kritaWasm QT_WASM_PTHREAD_POOL_SIZE 4)
++    target_link_options(krita PRIVATE -sDISABLE_EXCEPTION_CATCHING=0 -sASSERTIONS=1)
+ else()
+     add_executable(krita ${krita_SRCS})
+ endif()
+@@ -238,7 +245,7 @@
+     set_target_properties(krita PROPERTIES MACOSX_BUNDLE_COPYRIGHT "GNU Public License, V2 or, at your option, any later version.")
+ endif ()
+ 
+-if (NOT ANDROID)
++if (NOT ANDROID AND NOT EMSCRIPTEN)
+   set(KRITAVERSION_SRCS kritaversion.cpp)
+   add_executable(krita_version ${KRITAVERSION_SRCS})
+   target_link_libraries(krita_version
+diff --git a/libs/koplugin/CMakeLists.txt b/libs/koplugin/CMakeLists.txt
+--- a/libs/koplugin/CMakeLists.txt
++++ b/libs/koplugin/CMakeLists.txt
+@@ -28,4 +28,6 @@
+ )
+ install(TARGETS kritaplugin ${INSTALL_TARGETS_DEFAULT_ARGS} )
+ 
+-add_subdirectory(tests)
+\ No newline at end of file
++if(BUILD_TESTING)
++    add_subdirectory(tests)
++endif()
+diff --git a/plugins/dockers/svgcollectiondocker/Plugin.cpp b/plugins/dockers/svgcollectiondocker/Plugin.cpp
+--- a/plugins/dockers/svgcollectiondocker/Plugin.cpp
++++ b/plugins/dockers/svgcollectiondocker/Plugin.cpp
+@@ -11,9 +11,9 @@
+ 
+ #include <kpluginfactory.h>
+ 
+-K_PLUGIN_FACTORY_WITH_JSON(PluginFactory, "svgcollectiondocker.json", registerPlugin<Plugin>();)
++K_PLUGIN_FACTORY_WITH_JSON(PluginFactory, "svgcollectiondocker.json", registerPlugin<SvgCollectionDockerPlugin>();)
+ 
+-Plugin::Plugin(QObject *parent, const QVariantList &)
++SvgCollectionDockerPlugin::SvgCollectionDockerPlugin(QObject *parent, const QVariantList &)
+     : QObject(parent)
+ {
+     KoDockRegistry::instance()->add(new SvgSymbolCollectionDockerFactory());
+diff --git a/plugins/dockers/svgcollectiondocker/Plugin.h b/plugins/dockers/svgcollectiondocker/Plugin.h
+--- a/plugins/dockers/svgcollectiondocker/Plugin.h
++++ b/plugins/dockers/svgcollectiondocker/Plugin.h
+@@ -9,13 +9,13 @@
+ #include <QObject>
+ #include <QVariantList>
+ 
+-class Plugin : public QObject
++class SvgCollectionDockerPlugin : public QObject
+ {
+     Q_OBJECT
+ 
+ public:
+-    Plugin(QObject *parent, const QVariantList &);
+-    ~Plugin() override {}
++    SvgCollectionDockerPlugin(QObject *parent, const QVariantList &);
++    ~SvgCollectionDockerPlugin() override {}
+ };
+ 
+ #endif
+diff --git a/plugins/tools/defaulttool/Plugin.cpp b/plugins/tools/defaulttool/Plugin.cpp
+--- a/plugins/tools/defaulttool/Plugin.cpp
++++ b/plugins/tools/defaulttool/Plugin.cpp
+@@ -11,9 +11,9 @@
+ 
+ #include <kpluginfactory.h>
+ 
+-K_PLUGIN_FACTORY_WITH_JSON(PluginFactory, "calligra_tool_defaults.json", registerPlugin<Plugin>();)
++K_PLUGIN_FACTORY_WITH_JSON(PluginFactory, "calligra_tool_defaults.json", registerPlugin<DefaultToolsPlugin>();)
+ 
+-Plugin::Plugin(QObject *parent, const QVariantList &)
++DefaultToolsPlugin::DefaultToolsPlugin(QObject *parent, const QVariantList &)
+     : QObject(parent)
+ {
+     KoToolRegistry::instance()->add(new DefaultToolFactory());
+diff --git a/plugins/tools/defaulttool/Plugin.h b/plugins/tools/defaulttool/Plugin.h
+--- a/plugins/tools/defaulttool/Plugin.h
++++ b/plugins/tools/defaulttool/Plugin.h
+@@ -9,12 +9,12 @@
+ #include <QObject>
+ #include <QVariantList>
+ 
+-class Plugin : public QObject
++class DefaultToolsPlugin : public QObject
+ {
+     Q_OBJECT
+ 
+ public:
+-    Plugin(QObject *parent, const QVariantList &);
+-    ~Plugin() override {}
++    DefaultToolsPlugin(QObject *parent, const QVariantList &);
++    ~DefaultToolsPlugin() override {}
+ };
+ #endif
+diff --git a/plugins/tools/svgtexttool/Plugin.cpp b/plugins/tools/svgtexttool/Plugin.cpp
+--- a/plugins/tools/svgtexttool/Plugin.cpp
++++ b/plugins/tools/svgtexttool/Plugin.cpp
+@@ -20,7 +20,7 @@
+ #include "SvgTextToolOptionsModel.h"
+ #include "SvgTextToolOptionsManager.h"
+ 
+-K_PLUGIN_FACTORY_WITH_JSON(PluginFactory, "krita_tool_svgtext.json", registerPlugin<Plugin>();)
++K_PLUGIN_FACTORY_WITH_JSON(PluginFactory, "krita_tool_svgtext.json", registerPlugin<SvgTextToolPlugin>();)
+ 
+ KIS_DECLARE_STATIC_INITIALIZER {
+     qmlRegisterType<GlyphPaletteProxyModel>("org.krita.tools.text", 1, 0, "GlyphPaletteProxyModel");
+@@ -28,7 +28,7 @@
+     qmlRegisterType<SvgTextToolOptionsModel>("org.krita.tools.text", 1, 0, "SvgTextToolOptionsModel");
+     qmlRegisterType<SvgTextToolOptionsManager>("org.krita.tools.text", 1, 0, "SvgTextToolOptionsManager");
+ }
+-Plugin::Plugin(QObject *parent, const QVariantList &)
++SvgTextToolPlugin::SvgTextToolPlugin(QObject *parent, const QVariantList &)
+     : QObject(parent)
+ {
+     KoToolRegistry::instance()->add(new SvgTextToolFactory());
+diff --git a/plugins/tools/svgtexttool/Plugin.h b/plugins/tools/svgtexttool/Plugin.h
+--- a/plugins/tools/svgtexttool/Plugin.h
++++ b/plugins/tools/svgtexttool/Plugin.h
+@@ -11,13 +11,13 @@
+ #include <QObject>
+ #include <QVariantList>
+ 
+-class Plugin : public QObject
++class SvgTextToolPlugin : public QObject
+ {
+     Q_OBJECT
+ 
+ public:
+-    Plugin(QObject *parent, const QVariantList &);
+-    ~Plugin() {}
++    SvgTextToolPlugin(QObject *parent, const QVariantList &);
++    ~SvgTextToolPlugin() {}
+ };
+ 
+ #endif

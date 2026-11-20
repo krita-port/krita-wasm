@@ -1,0 +1,22 @@
+Subject: [PATCH] Prioritize KRA content over the generic ZIP signature
+
+KRA's content rules identify the document's MIME marker, but have the same
+priority as the generic ZIP signature. QMimeXMLProvider warns about the
+unrelated equal-priority matches when examining a KRA document's contents.
+Give the more specific KRA rules higher priority, retaining recognition
+of both the ZIP and legacy gzip variants without changing MIME inheritance.
+
+The upstream file retains its original copyright and license notices.
+
+diff --git a/krita/data/mime-database/freedesktop.org.xml b/krita/data/mime-database/freedesktop.org.xml
+--- a/krita/data/mime-database/freedesktop.org.xml
++++ b/krita/data/mime-database/freedesktop.org.xml
+@@ -14897,7 +14897,7 @@
+     <comment xml:lang="zh-CN">Krita 文档</comment>
+     <comment xml:lang="zh-TW">Krita 文件</comment>
+     <generic-icon name="x-office-document"/>
+-    <magic priority="60">
++    <magic priority="70">
+       <match type="string" value="\037\213" offset="0">
+         <match type="string" value="KOffice" offset="10">
+           <match type="string" value="application/x-krita\004\006" offset="18"/>

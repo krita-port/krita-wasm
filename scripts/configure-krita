@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Configure Krita against verified prebuilt dependencies.
+set -euo pipefail
+project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+sdk_environment=$(python3 "$project_root/scripts/sdk.py" environment)
+eval "$sdk_environment"
+sdk_prefix=$KRITA_SDK_DIR
+i18n_prefix=$KRITA_I18N_DIR
+python3 "$project_root/scripts/sdk.py" verify-i18n
+c_flags="-pthread -fwasm-exceptions"
+cxx_flags="$c_flags"
+# Translate the whole linked module, including the frozen native-EH archives.
+link_flags="--profiling-funcs -fwasm-exceptions -sJSPI=1 -sBINARYEN_EXTRA_PASSES=--emit-exnref"
+source_dir=$("$project_root/scripts/project.py" build-source-path)
+output_dir="$project_root/build/cmake/krita-${sdk_prefix##*/}-wasm"
+options=()
+for package in PythonLibrary SIP PyQt5 PyQt6 Mlt7 WebP KSeExpr OpenEXR TIFF JPEG libjpeg-turbo GIF HEIF OpenJPEG JPEGXL FFTW3 OpenColorIO LibMyPaint Poppler KDcrawQt6 KF5KDcraw; do
+    options+=("-DCMAKE_DISABLE_FIND_PACKAGE_$package=ON")
+done
+"$project_root/scripts/with-emsdk" "$sdk_prefix/target/bin/qt-cmake" \
+    -S "$source_dir" -B "$output_dir" -G Ninja \
+    "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_INSTALL_PREFIX=$project_root/build/install/krita" \
+    "-DKRITA_I18N_DIR=$i18n_prefix" \
+    "-DGETTEXT_MSGFMT_EXECUTABLE=$i18n_prefix/host/bin/msgfmt" \
+    "-DGETTEXT_MSGMERGE_EXECUTABLE=$i18n_prefix/host/bin/msgmerge" \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    "-DKRITA_WASM_GLUE_DIR=$project_root/src" \
+    "-DCMAKE_C_FLAGS=$c_flags" "-DCMAKE_CXX_FLAGS=$cxx_flags" \
+    "-DCMAKE_EXE_LINKER_FLAGS=$link_flags" \
+    "-DQT_HOST_PATH=$sdk_prefix/host" "-DQT_HOST_PATH_CMAKE_DIR=$sdk_prefix/host/lib/cmake" \
+    "-DKF6_HOST_TOOLING=$sdk_prefix/host/lib/cmake" \
+    "-DECM_DIR=$sdk_prefix/common/share/ECM/cmake" \
+    "-DCMAKE_PREFIX_PATH=$sdk_prefix/target;$sdk_prefix/common" "-DCMAKE_FIND_ROOT_PATH=$sdk_prefix/target" \
+    -DBUILD_WITH_QT6=ON -DALLOW_UNSTABLE=QT6 -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF \
+    -DBUILD_KRITA_QT_DESIGNER_PLUGINS=OFF -DKRITA_USE_SURFACE_COLOR_MANAGEMENT_API=OFF \
+    -DENABLE_UPDATERS=OFF -DUSE_EXTERNAL_RAQM=OFF -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+    -DKF_SKIP_PO_PROCESSING=OFF "${options[@]}"
+python3 "$project_root/scripts/check-compile-sources.py" "$output_dir" --source "$source_dir" --sdk "$sdk_prefix" --i18n "$i18n_prefix"

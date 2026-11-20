@@ -1,0 +1,30 @@
+diff --git a/libs/widgetutils/KoFileDialog.cpp b/libs/widgetutils/KoFileDialog.cpp
+--- a/libs/widgetutils/KoFileDialog.cpp
++++ b/libs/widgetutils/KoFileDialog.cpp
+@@ -184,6 +184,26 @@
+     d->fileDialog->setOption(QFileDialog::DontUseNativeDialog, optionDontUseNative);
+     d->fileDialog->setOption(QFileDialog::DontConfirmOverwrite, false);
+     d->fileDialog->setOption(QFileDialog::HideNameFilterDetails, dontUseNative ? true : false);
++
++#ifdef Q_OS_WASM
++    // Qt restores sidebar URLs from localStorage, independently of HOME.
++    // Keep valid document bookmarks, remapping old physical mount paths.
++    const QString browserFiles = QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR"));
++    if (!browserFiles.isEmpty()) {
++        const QString physicalFiles = QFileInfo(browserFiles).canonicalFilePath();
++        QList<QUrl> urls{QUrl(QStringLiteral("file:")), QUrl::fromLocalFile(browserFiles)};
++        for (const QUrl &url : d->fileDialog->sidebarUrls()) {
++            QString path = url.toLocalFile();
++            if (!physicalFiles.isEmpty() && (path == physicalFiles || path.startsWith(physicalFiles + QLatin1Char('/'))))
++                path = browserFiles + path.mid(physicalFiles.size());
++            if (path.startsWith(browserFiles + QLatin1Char('/'))) {
++                const auto bookmark = QUrl::fromLocalFile(path);
++                if (!urls.contains(bookmark)) urls.append(bookmark);
++            }
++        }
++        d->fileDialog->setSidebarUrls(urls);
++    }
++#endif
+ 
+ 
+ #ifdef Q_OS_MACOS
