@@ -27,5 +27,6 @@
   "error": "Earráid",
   "details": "Sonraí",
   "preparing": "Á luchtú…",
-  "starting": "Á luchtú…"
+  "starting": "Á luchtú…",
+  "clearRuntimeCache": "Bain an pacáiste ón taisce agus bain triail eile as? Má theipeann ar an lódáil, roghnaigh pacáiste arís. Coinneofar na líníochtaí sábháilte."
 }

@@ -27,5 +27,6 @@
   "error": "Fout",
   "details": "Besonderhede",
   "preparing": "Laai tans…",
-  "starting": "Laai tans…"
+  "starting": "Laai tans…",
+  "clearRuntimeCache": "Verwyder die gekaste looptydpakket en probeer weer? As laai misluk, kies weer ’n pakket. Gestoorde tekeninge bly behoue."
 }

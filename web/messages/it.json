@@ -27,5 +27,6 @@
   "error": "Errore",
   "details": "Dettagli",
   "preparing": "Caricamento…",
-  "starting": "Caricamento…"
+  "starting": "Caricamento…",
+  "clearRuntimeCache": "Rimuovere il pacchetto dalla cache e riprovare? Se il caricamento non riesce, selezionare nuovamente un pacchetto. I disegni salvati vengono conservati."
 }

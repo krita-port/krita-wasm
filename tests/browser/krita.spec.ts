@@ -1,11 +1,13 @@
-import type { BrowserContext, Dialog } from '@playwright/test'
+import type { BrowserContext, Dialog, Download } from '@playwright/test'
 import type { DocumentSnapshot, WidgetSnapshot } from './native.js'
 import { Buffer } from 'node:buffer'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { createServer } from 'vite'
 import { languageTag } from '../../web/i18n.ts'
 import englishMessages from '../../web/messages/en.json' with { type: 'json' }
-import { expect, test } from './fixtures.ts'
+import { expect, stored, test } from './fixtures.ts'
 
 import { artifact, KritaUI } from './krita-ui.ts'
 
@@ -60,6 +62,9 @@ async function files(ui: KritaUI) {
   const { page } = ui
   const downloads = ui.info.outputPath('downloads')
   mkdirSync(downloads)
+  const browserDownloads: string[] = []
+  const recordDownload = (event: Download) => browserDownloads.push(event.suggestedFilename())
+  page.on('download', recordDownload)
   const fileAction = async (action: string) => {
     if (!await ui.find({ action })) {
       await ui.click({ action: 'file' })
@@ -70,7 +75,7 @@ async function files(ui: KritaUI) {
   const dialog = () => ui.find({ class: 'KisPreviewFileDialog' })
   const choose = async (name: string) => {
     await ui.wait(dialog, 'synchronous file dialog')
-    await ui.replace({ name: 'fileNameEdit' }, `/tmp/${name}`)
+    await ui.replace({ name: 'fileNameEdit' }, `/Documents/${name}`)
     ui.write(`file-entry-${basename(name)}.json`, await ui.snapshot())
     await page.keyboard.press('Tab')
     await ui.wait(async () => (await ui.find({ standardButton: 2048 }))?.enabled, 'file model enables Save')
@@ -91,18 +96,62 @@ async function files(ui: KritaUI) {
     await ui.wait(async () => !await ui.find({ name: 'kritaWasmDownloadDialog' }), 'download prompt closes')
     return path
   }
+  await page.evaluate(() => {
+    window.kritaTestFS.mkdirTree('/Documents/dialog-subdirectory')
+    window.kritaTestFS.writeFile('/Documents/not-a-directory', new Uint8Array([1]))
+    window.kritaTestFS.symlink('/tmp', '/Documents/outside-link')
+  })
   const before = await ui.documents()
   const pixels = await ui.darkPixels()
   await fileAction('file_save')
   await ui.wait(dialog, 'Save synchronous dialog')
   await ui.shot('05-save-dialog')
+  // The user file browser is rooted at Documents, including typed paths and
+  // symlink resolution; regular subdirectory navigation must still work.
+  expect((await dialog())!.directory).toBe('/Documents')
+  expect((await ui.find({ name: 'toParentButton' }))!.enabled).toBe(false)
+  expect((await ui.snapshot()).filter(item => item.class === 'KritaTestFileItem' && item.viewName === 'sidebar').map(item => item.filePath)).toEqual(['/Documents'])
+  await page.keyboard.press('Control+ArrowUp')
+  await ui.wait(async () => (await dialog())?.directory === '/Documents', 'keyboard parent stays at cache root')
+  const view = await ui.find({ name: 'treeView' }) || await ui.find({ name: 'listView' })
+  await ui.click({ class: view!.class, name: view!.name })
+  await page.keyboard.press('Backspace')
+  await ui.wait(async () => (await dialog())?.directory === '/Documents', 'Backspace stays at cache root')
+  if ((await ui.find({ name: 'backButton' }))?.enabled)
+    await ui.click({ name: 'backButton' })
+  await ui.wait(async () => (await dialog())?.directory === '/Documents', 'native history cannot leave the cache root')
+  await ui.wait(() => ui.find({ class: 'KritaTestFileItem', filePath: '/Documents/dialog-subdirectory' }), 'cache subdirectory listed')
+  await page.mouse.dblclick(...await ui.center(await ui.find({ class: 'KritaTestFileItem', filePath: '/Documents/dialog-subdirectory' })))
+  await ui.wait(async () => (await dialog())?.directory === '/Documents/dialog-subdirectory', 'cache subdirectory entered')
+  await ui.click({ name: 'toParentButton' })
+  await ui.wait(async () => (await dialog())?.directory === '/Documents', 'parent returns to cache root')
+  expect((await ui.find({ name: 'toParentButton' }))!.enabled).toBe(false)
+  await ui.click({ name: 'backButton' })
+  await ui.wait(async () => (await dialog())?.directory === '/Documents/dialog-subdirectory', 'Back returns to the permitted subdirectory')
+  await ui.click({ name: 'forwardButton' })
+  await ui.wait(async () => (await dialog())?.directory === '/Documents', 'Forward returns to the cache root')
+  expect(await ui.find({ class: 'KritaTestFileItem', filePath: '/Documents/outside-link' })).toBeUndefined()
+  for (const outside of ['/tmp/browser-dialog-outside.kra', '../tmp/browser-dialog-outside.kra', '/Documents/outside-link/browser-dialog-outside.kra']) {
+    await ui.replace({ name: 'fileNameEdit' }, outside)
+    await page.keyboard.press('Enter')
+    await ui.wait(async () => (await dialog())?.directory === '/Documents', 'outside path rejected without leaving cache root')
+    expect(await ui.find({ name: 'kritaWasmDownloadDialog' })).toBeUndefined()
+  }
+  expect(await page.evaluate(() => {
+    try {
+      window.kritaTestFS.stat('/tmp/browser-dialog-outside.kra')
+      return true
+    }
+    catch { return false }
+  })).toBe(false)
+  await page.evaluate(() => window.kritaTestFS.unlink('/Documents/outside-link'))
   await ui.click({ standardButton: 4194304 })
   await ui.wait(async () => !await dialog(), 'Save cancellation')
   expect(await ui.documents()).toEqual(before)
   expect(await ui.darkPixels()).toBe(pixels)
-  expect(readdirSync(downloads)).toEqual([])
+  expect(browserDownloads).toEqual([])
   await fileAction('file_save')
-  await choose('missing-browser-directory/Browser-error.kra')
+  await choose('not-a-directory/Browser-error.kra')
   await ui.wait(() => ui.find({ class: 'QMessageBox' }), 'synchronous save error')
   await ui.shot('05-save-error')
   await ui.click({ standardButton: 1024 })
@@ -111,7 +160,7 @@ async function files(ui: KritaUI) {
     await ui.click({ standardButton: 4194304 })
   await ui.wait(async () => !await dialog(), 'save error returns to document')
   expect(await ui.documents()).toEqual(before)
-  expect(readdirSync(downloads)).toEqual([])
+  expect(browserDownloads).toEqual([])
   await fileAction('file_save')
   await choose('Browser-save.kra')
   const saved = await download('Browser-save.kra')
@@ -129,7 +178,7 @@ async function files(ui: KritaUI) {
   await ui.click({ standardButton: 4194304 })
   await ui.wait(async () => !await dialog(), 'Save As cancellation')
   expect(await ui.documents()).toEqual(savedState)
-  expect(readdirSync(downloads)).toHaveLength(1)
+  expect(browserDownloads).toEqual(['Browser-save.kra'])
   result.overwrite_rejection_preserved_document = true
   for (const method of ['close', 'escape'] as const) {
     await fileAction('file_open')
@@ -241,9 +290,10 @@ async function files(ui: KritaUI) {
     const input = method === 'drop'
       ? droppedFile
       : saved
+    const previousPaths = new Set((await ui.documents()).map(document => document.path))
     await ui.chooseDeviceFile(input, method)
     await ui.wait(async () => (await ui.documents()).length === before.length + 1, `actual KRA device ${method}`, 180_000)
-    const reopened = (await ui.documents()).find(item => item.path.endsWith(`/${basename(input)}`) && !item.path.startsWith('/tmp/Browser-save'))
+    const reopened = (await ui.documents()).find(item => !previousPaths.has(item.path) && item.path.endsWith(`/${basename(input)}`))
     expect(reopened).toMatchObject({ width: 256, height: 256, layers: result.kra.layers })
     await ui.wait(async () => await ui.darkPixels() > 100, 'reopened KRA renders strokes')
     result.reopened = reopened
@@ -265,7 +315,7 @@ async function files(ui: KritaUI) {
   await ui.click({ buttonRole: 1 })
   await ui.wait(async () => !await ui.find({ class: 'KoDialog' }), 'PNG cancellation')
   expect(await ui.documents()).toEqual(exportBefore)
-  expect(readdirSync(downloads)).not.toContain('Browser-export.png')
+  expect(browserDownloads).toEqual(['Browser-save.kra', 'Browser-copy.kra'])
   await fileAction('file_export_file')
   await choose('Browser-export.png')
   await ui.wait(() => ui.find({ class: 'KoDialog' }), 'PNG export retry')
@@ -277,6 +327,8 @@ async function files(ui: KritaUI) {
   result.png = artifact('png', await download('Browser-export.png'))
   expect(result.png).toEqual(result.kra.projection)
   result.export_cancel_preserved_document = true
+  expect(browserDownloads).toEqual(['Browser-save.kra', 'Browser-copy.kra', 'Browser-export.png'])
+  page.off('download', recordDownload)
   ui.write('file-results.json', result)
 }
 
@@ -392,6 +444,10 @@ async function floatingSettings(ui: KritaUI) {
   const saved = (await toggle.boundingBox())!
   const remembered = await page.evaluate(() => JSON.parse(localStorage.getItem('krita.settings-position')!))
   expect(remembered).toEqual({ x: saved.x, y: saved.y })
+  await page.setViewportSize({ width: 720, height: 480 })
+  await expect.poll(async () => (await toggle.boundingBox())!.y).toBeLessThan(saved.y)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expect.poll(() => toggle.boundingBox()).toEqual(saved)
   await toggle.click()
   await expect(modal).toBeVisible()
   await expect(page.locator('#language')).toBeFocused()
@@ -875,6 +931,57 @@ test('floating widget styles synchronize with native menus and survive reload', 
   })
 })
 
+test('appearance choices during startup do not hide later native theme changes', async ({ page }) => {
+  const server = await createServer({
+    server: { host: '127.0.0.1', port: 0 },
+  })
+  await server.listen()
+  try {
+    await page.emulateMedia({ colorScheme: 'light' })
+    await page.route('**/', route => route.fulfill({
+      contentType: 'text/html',
+      body: '<select id="appearance"><option>auto</option><option>light</option><option>dark</option></select><div id="qt-shadow-container"></div>',
+    }))
+    await page.goto(server.resolvedUrls!.local[0])
+    const observed = await page.evaluate(async () => {
+      document.querySelector('#qt-shadow-container')!.attachShadow({ mode: 'open' })
+      const { installAppearance } = await import(`${location.origin}/settings.ts`)
+      const select = document.querySelector<HTMLSelectElement>('#appearance')!
+      const appearance = installAppearance(select, localStorage)
+      const choose = (value: string) => {
+        select.value = value
+        select.dispatchEvent(new Event('change'))
+      }
+      choose('dark')
+      appearance.connectNative(() => 1)
+      choose('light')
+      globalThis.kritaPalette = {
+        dark: false,
+        window: '#ffffff',
+        windowText: '#000000',
+        button: '#ffffff',
+        buttonText: '#000000',
+        border: '#aaaaaa',
+        accent: '#0000ff',
+        accentText: '#ffffff',
+        link: '#0000ff',
+      }
+      window.dispatchEvent(new Event('krita-palette-change'))
+      globalThis.kritaPalette.dark = true
+      window.dispatchEvent(new Event('krita-palette-change'))
+      return {
+        selected: select.value,
+        saved: localStorage.getItem('krita.color-scheme'),
+        rendered: document.documentElement.dataset.colorScheme,
+      }
+    })
+    expect(observed).toEqual({ selected: 'dark', saved: 'dark', rendered: 'dark' })
+  }
+  finally {
+    await server.close()
+  }
+})
+
 for (const initial of ['light', 'dark'] as const) {
   test(`appearance follows browser, manual choice and native themes (${initial})`, async ({ page, context, web }, info) => {
     await page.emulateMedia({ colorScheme: initial })
@@ -1093,12 +1200,62 @@ test.describe('Manual release bundle loader', () => {
       })
       await expect(page.locator('#bundle-error')).toContainText('Error:')
       await expect(page.locator('#bundle-panel')).toBeVisible()
-      const pending = page.waitForEvent('download')
-      await page.locator('#bundle-release').click()
-      const download = await pending
+      const descriptor = await (await page.request.get(`${previewURL}/bundle.json`)).json()
       const file = info.outputPath('downloaded-krita.bundle.tar.gz')
-      await download.saveAs(file)
-      expect(await download.failure()).toBeNull()
+      if (descriptor.release_url) {
+        await expect(page.locator('#bundle-release')).toHaveAttribute('href', descriptor.release_url)
+        const response = await page.request.get(`${previewURL}/krita.bundle.tar.gz`)
+        expect(response.ok()).toBe(true)
+        writeFileSync(file, await response.body())
+      }
+      else {
+        const pending = page.waitForEvent('download')
+        await page.locator('#bundle-release').click()
+        const download = await pending
+        await download.saveAs(file)
+        expect(await download.failure()).toBeNull()
+      }
+      const malformed = info.outputPath('malformed-i18n.tar.gz')
+      const brokenResources = info.outputPath('malformed-resources.tar.gz')
+      const incompatible = info.outputPath('incompatible-runtime.tar.gz')
+      execFileSync('python3', [
+        '-c',
+        `
+import io,sys,tarfile
+conflicting = io.BytesIO()
+with tarfile.open(fileobj=conflicting, mode='w', format=tarfile.USTAR_FORMAT) as resources:
+ for name in ('krita/share/item', 'krita/share/item/image.png'):
+  entry=tarfile.TarInfo(name);entry.size=1
+  resources.addfile(entry,io.BytesIO(b'x'))
+for output,member,data in [(sys.argv[2],'i18n.json',b'{broken'),(sys.argv[3],'resources.tar',conflicting.getvalue()),(sys.argv[4],'runtime.json',sys.argv[5].encode())]:
+ with tarfile.open(sys.argv[1], 'r|gz') as source, tarfile.open(output, 'w|gz', format=tarfile.USTAR_FORMAT) as target:
+  for entry in source:
+   if entry.name == member:
+    entry.size=len(data);target.addfile(entry,io.BytesIO(data))
+   else:
+    target.addfile(entry,source.extractfile(entry))
+`,
+        file,
+        malformed,
+        brokenResources,
+        incompatible,
+        JSON.stringify({
+          jspi: method === 'drop',
+          cxx_exceptions: method === 'drop'
+            ? 'emscripten-js'
+            : 'wasm-native',
+          startup_event: 'krita-ready',
+          file_dialog: 'linked-batch',
+        }),
+      ])
+      await page.locator('#bundle-file').setInputFiles(malformed)
+      await expect(page.locator('#bundle-file')).toBeEnabled()
+      await expect(page.locator('#bundle-error')).not.toBeEmpty()
+      await page.locator('#bundle-file').setInputFiles(incompatible)
+      await expect(page.locator('#bundle-error')).toContainText('Invalid runtime configuration')
+      await expect(page.locator('#bundle-file')).toBeEnabled()
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await expect(page.locator('#bundle-panel')).toBeVisible()
       const dropFile = async (variant: boolean) => {
       // Playwright supplies an actual downloaded File; the browser's drop
       // event passes that same File through the product's drop handler.
@@ -1161,16 +1318,191 @@ test.describe('Manual release bundle loader', () => {
       expect(await ui.documents()).toEqual([])
       expect(web.requests.filter(path => path.endsWith('/krita.bundle.tar.gz'))).toHaveLength(1)
       expect(web.requests.filter(path => path.endsWith('.wasm') || (path.includes('/assets/') && !/\.(?:js|css)$/.test(path)))).toEqual([])
+      if (method === 'drop') {
+        const originalMetadata = await page.evaluate(async () => {
+          const scope = new URL('./', location.href)
+          const cache = await caches.open(`krita-runtime-v2:${scope.href}`)
+          const { id } = await (await cache.match(new URL('.runtime/active.json', scope)))!.json()
+          const url = new URL(`.runtime/${id}/runtime.json`, scope).href
+          const response = (await cache.match(url))!
+          const text = await response.text()
+          const data = JSON.parse(text)
+          data.file_dialog = 'incompatible'
+          const bytes = new TextEncoder().encode(JSON.stringify(data))
+          // Keep the recorded length valid so the ABI check is exercised.
+          const active = await (await cache.match(new URL('.runtime/active.json', scope)))!.json()
+          active.files['runtime.json'] = bytes.length
+          await cache.put(url, new Response(bytes, {
+            headers: {
+              'Content-Length': String(bytes.length),
+            },
+          }))
+          await cache.put(new URL('.runtime/active.json', scope), Response.json(active))
+          return { url, text, active }
+        })
+        const incompatiblePage = await page.context().newPage()
+        try {
+          await incompatiblePage.goto(`${previewURL}/?lang=en`, { waitUntil: 'domcontentloaded' })
+          await expect(incompatiblePage.locator('#bundle-panel')).toBeVisible()
+          await expect(incompatiblePage.locator('#failure')).toBeHidden()
+        }
+        finally {
+          await incompatiblePage.close()
+          await page.evaluate(async ({ url, text, active }) => {
+            const scope = new URL('./', location.href)
+            const cache = await caches.open(`krita-runtime-v2:${scope.href}`)
+            active.files['runtime.json'] = new TextEncoder().encode(text).length
+            await cache.put(url, new Response(text, {
+              headers: {
+                'Content-Length': String(active.files['runtime.json']),
+              },
+            }))
+            await cache.put(new URL('.runtime/active.json', scope), Response.json(active))
+          }, originalMetadata)
+        }
+      }
       if (method === 'picker') {
+        const invalidLink = await page.context().newPage()
+        try {
+          await invalidLink.addInitScript(() => {
+            const fetch = window.fetch
+            window.fetch = async (resource, init) => {
+              const response = await fetch(resource, init)
+              const url = resource instanceof Request
+                ? resource.url
+                : String(resource)
+              if (!url.endsWith('/bundle.json'))
+                return response
+              return Response.json({
+                ...await response.json(),
+                release_url: 'https://github.com%2F/OWNER/REPO/releases',
+              })
+            }
+          })
+          await invalidLink.goto(`${previewURL}/?bundle=choose&lang=en`, { waitUntil: 'domcontentloaded' })
+          await expect(invalidLink.locator('#bundle-panel')).toBeVisible()
+          await expect(invalidLink.locator('#bundle-release')).toBeHidden()
+          await invalidLink.locator('#bundle-file').setInputFiles({
+            name: 'invalid.tar.gz',
+            mimeType: 'application/gzip',
+            buffer: Buffer.from('not an archive'),
+          })
+          await expect(invalidLink.locator('#bundle-error')).not.toBeEmpty()
+        }
+        finally {
+          await invalidLink.close()
+        }
+        // The candidate still contains the real Wasm and manifest, but its
+        // JavaScript glue drops a required export before Krita's preRun.
+        const missingBridge = await page.context().newPage()
+        try {
+          await missingBridge.addInitScript(() => {
+            const put = Cache.prototype.put
+            Cache.prototype.put = async function (request, response) {
+              if (String(request).endsWith('/krita.js')) {
+                const script = await response.text()
+                response = new Response(`${script}
+;{ const original = kritaWasm
+  kritaWasm = (options) => {
+    options.preRun.unshift((instance) => { delete instance._kritaWasmSetWidgetStyle })
+    return original(options)
+  }
+}`, { headers: response.headers })
+              }
+              return put.call(this, request, response)
+            }
+          })
+          await missingBridge.goto(`${previewURL}/?bundle=choose&lang=en`, { waitUntil: 'domcontentloaded' })
+          await missingBridge.locator('#bundle-file').setInputFiles(file)
+          await expect(missingBridge.locator('#failure-stack')).toContainText('Missing native runtime export: _kritaWasmSetWidgetStyle')
+          expect(await runtimeId()).toBe(firstRuntime)
+        }
+        finally {
+          await missingBridge.close()
+        }
+        // A cached runtime that fails to instantiate must not retain the
+        // shared generation lease needed by quota-limited replacement.
+        for (const mode of ['wasm', 'native'] as const) {
+          const failed = await page.context().newPage()
+          await failed.addInitScript((mode) => {
+            if (mode === 'native') {
+              const dispatch = window.dispatchEvent
+              window.dispatchEvent = function (event) {
+                return dispatch.call(this, event.type === 'krita-ready'
+                  ? new CustomEvent('krita-startup-failed', { detail: 'Injected native startup failure' })
+                  : event)
+              }
+              return
+            }
+            const fail = async () => {
+              throw new WebAssembly.CompileError('Injected cached startup failure')
+            }
+            WebAssembly.instantiate = fail
+            WebAssembly.instantiateStreaming = fail
+          }, mode)
+          // No test transport on the intentionally failing page.
+          await failed.goto(`${previewURL}/?lang=en`, { waitUntil: 'domcontentloaded' })
+          await expect(failed.locator('#failure')).toBeVisible({ timeout: 90_000 })
+          await expect(failed.locator('#failure-stack')).toContainText(mode === 'native'
+            ? 'Injected native startup failure'
+            : 'Injected cached startup failure')
+          await expect.poll(() => failed.evaluate(async () => {
+            const marker = `krita-test-pin:${crypto.randomUUID()}`
+            let release: () => void = () => {}
+            await new Promise<void>((resolve) => {
+              void navigator.locks.request(marker, () => new Promise<void>((unlock) => {
+                release = unlock
+                resolve()
+              }))
+            })
+            try {
+              const { held = [] } = await navigator.locks.query()
+              const owner = held.find(lock => lock.name === marker)!.clientId
+              return held.filter(lock => lock.clientId === owner && lock.name?.startsWith('krita-runtime-v2:')).length
+            }
+            finally { release() }
+          })).toBe(0)
+          await failed.close()
+        }
+        const older = await page.context().newPage()
+        const olderUI = new KritaUI(older, { ...web, url: previewURL }, info)
+        await olderUI.start()
+        await olderUI.wait(() => olderUI.find({ class: 'KisMainWindow' }), 'second tab keeps the original runtime')
         page.once('dialog', dialog => dialog.accept())
         web.statuses.length = 0
         await page.locator('#settings-toggle').click()
         await page.locator('#bundle-replace').click()
         await expect(page.locator('#bundle-panel')).toBeVisible()
+        await page.locator('#bundle-file').setInputFiles(brokenResources)
+        await expect(page.locator('#bundle-error')).toContainText('Archive file and directory conflict.')
+        await expect(page.locator('#bundle-panel')).toBeVisible()
+        expect(await runtimeId()).toBe(firstRuntime)
         alternateArchive = await dropFile(true)
         await ui.waitForStartup()
         await ui.verifyStartup('en_US')
-        expect(await runtimeId()).not.toBe(firstRuntime)
+        const replacementRuntime = await runtimeId()
+        expect(replacementRuntime).not.toBe(firstRuntime)
+        // An older tab can request its own chooser without erasing the newer
+        // published selection that other tabs will reuse.
+        older.once('dialog', dialog => dialog.accept())
+        await older.locator('#settings-toggle').click()
+        await older.locator('#bundle-replace').click()
+        await expect(older.locator('#bundle-panel')).toBeVisible()
+        expect(await runtimeId()).toBe(replacementRuntime)
+        await older.close()
+        web.statuses.length = 0
+        await page.reload({ waitUntil: 'domcontentloaded' })
+        await ui.waitForStartup()
+        await expect(page.locator('#bundle-panel')).toBeHidden()
+        expect(await runtimeId()).toBe(replacementRuntime)
+        const generations = await page.evaluate(async () => {
+          const scope = new URL('./', location.href)
+          const cache = await caches.open(`krita-runtime-v2:${scope.href}`)
+          return [
+            ...new Set((await cache.keys()).map(request => request.url.match(/\.runtime\/([a-f0-9]{32})\//)?.[1]).filter(Boolean)),
+          ]
+        })
+        expect(generations).toEqual([await runtimeId()])
         await ui.paint()
         await ui.undoRedo()
         ui.web.check()
@@ -1202,7 +1534,7 @@ async function localizedDownload(ui: KritaUI, locale: string, code: string, expe
   await page.keyboard.press('Control+s')
   await ui.wait(() => ui.find({ class: 'KisPreviewFileDialog' }), 'native Save dialog')
   const name = `Localized-${code}.kra`
-  await ui.replace({ name: 'fileNameEdit' }, `/tmp/${name}`)
+  await ui.replace({ name: 'fileNameEdit' }, `/Documents/${name}`)
   await page.keyboard.press('Tab')
   await ui.wait(async () => (await ui.find({ standardButton: 2048 }))?.enabled, 'native Save enabled')
   await ui.click({ standardButton: 2048 })
@@ -1277,6 +1609,102 @@ test.describe('UI workbench', () => {
           await viewActions(ui)
           ui.web.check()
         })
+        test('animation worker exports acknowledge cached PNG frames', async ({ workbench }) => {
+          const ui = await workbench()
+          const { page } = ui
+          await ui.paint()
+          await page.evaluate(async () => {
+            window.kritaTestFS.mkdirTree('/Documents/worker-frames')
+            const canvas = document.createElement('canvas')
+            canvas.width = 32
+            canvas.height = 32
+            const ctx = canvas.getContext('2d')!
+            ctx.fillStyle = 'red'
+            ctx.fillRect(0, 0, 32, 32)
+            const blob = await new Promise<Blob>(resolve => canvas.toBlob(blob => resolve(blob!)))
+            window.kritaTestFS.writeFile('/Documents/frame0.png', new Uint8Array(await blob.arrayBuffer()))
+          })
+          await ui.click({ action: 'file' })
+          await ui.click({ action: 'file_import_animation' })
+          await ui.click({ name: 'btnAddImages' })
+          await ui.wait(() => ui.find({ class: 'KritaTestFileItem', filePath: '/Documents/frame0.png' }), 'animation input frame')
+          await page.mouse.dblclick(...await ui.center(await ui.find({ class: 'KritaTestFileItem', filePath: '/Documents/frame0.png' })))
+          await ui.wait(async () => !await ui.find({ class: 'KisPreviewFileDialog' }), 'frame selected')
+          await ui.click({ buttonRole: 0 })
+          await ui.wait(async () => !await ui.find({ name: 'btnAddImages' }), 'actual animation imported')
+          const render = async (destination: string) => {
+            await ui.click({ action: 'file' })
+            await ui.click({ action: 'render_animation' })
+            await ui.wait(() => ui.find({ name: 'intEnd' }), 'render animation options')
+            await ui.replace({ name: 'intStart' }, 0)
+            await ui.replace({ name: 'intEnd' }, 1)
+            if ((await ui.find({ name: 'chkOnlyUniqueFrames' }))?.checked)
+              await ui.click({ name: 'chkOnlyUniqueFrames' })
+            await ui.replace({ name: 'txtBasename' }, 'worker-')
+            const request = (await ui.find({ name: 'dirRequester' }))!
+            const edits = (await ui.snapshot()).filter(w => w.class === 'QLineEdit' && w.x >= request.x && w.y >= request.y && w.x + w.width <= request.x + request.width && w.y + w.height <= request.y + request.height)
+            expect(edits).toHaveLength(1)
+            await ui.replace({
+              class: edits[0].class,
+              name: edits[0].name,
+              x: edits[0].x,
+              y: edits[0].y,
+            }, destination)
+            await ui.click({ buttonRole: 0 })
+            await ui.wait(async () => !await ui.find({ name: 'intEnd' }), 'render options accepted')
+          }
+          await render('/Documents/worker-frames')
+          const entries = async () => (await stored(page, false, 'saved')).filter(file => file.path.startsWith('/Documents/worker-frames/') && file.path.endsWith('.png'))
+          await ui.wait(async () => (await entries()).length === 2, 'rendered and copied worker frames durable in actual IndexedDB', 60_000)
+          expect(await page.evaluate(() => window.kritaRecovery.error)).toBeNull()
+          ui.web.check()
+          const frames = await entries()
+          expect(frames[0].size).toBeGreaterThan(0)
+          expect(frames[1].sha256).toBe(frames[0].sha256)
+          // Let the first virtual frame commit, then make the second frame's
+          // actual IndexedDB transaction fail. The first must also be removed.
+          const rejectSecond = await page.evaluateHandle(() => {
+            const put = IDBObjectStore.prototype.put
+            let rejected = false
+            IDBObjectStore.prototype.put = function (...args) {
+              const result = put.apply(this, args)
+              if (!rejected && String(args[1]).endsWith('/virtual/home/worker-frames/worker-0001.png')) {
+                rejected = true
+                const failure = this.add(args[0], args[1])
+                failure.onerror = () => this.transaction.abort()
+              }
+              return result
+            }
+            return {
+              rejected: () => rejected,
+              restore: () => { IDBObjectStore.prototype.put = put },
+            }
+          })
+          try {
+            await render('/home/worker-frames')
+            await ui.wait(() => rejectSecond.evaluate(fault => fault.rejected()), 'second virtual animation frame write was rejected')
+            await ui.wait(async () => {
+              const virtual = (await stored(page, false, 'virtual')).filter(file => file.path.startsWith('/home/worker-frames/'))
+              return virtual.length === 0 && await page.evaluate(() => {
+                const fs = window.kritaTestFS
+                return !fs.readdir('/home/worker-frames').some(name => name.endsWith('.png'))
+              })
+            }, 'failed render removes durable frames and their live aliases')
+            const errorMessage = { class: 'QLabel', text: 'Failed to render animation frames! Output files are incomplete.' }
+            await ui.wait(() => ui.find(errorMessage), 'native animation error shown')
+            await ui.click({ standardButton: 1024 })
+            await ui.wait(async () => !await ui.find(errorMessage), 'native animation error dismissed')
+            expect(await entries()).toEqual(frames)
+          }
+          finally {
+            await rejectSecond.evaluate(fault => fault.restore())
+            await rejectSecond.dispose()
+          }
+          ui.write('actual-animation-worker.json', {
+            frames,
+            range: [0, 1],
+          })
+        })
       }
       if (code === 'zh_CN' || code === 'ar') {
         test('new document and actual painting', async ({ workbench }) => {
@@ -1310,12 +1738,17 @@ test.describe('UI workbench', () => {
           for (let cycle = 0; cycle < 3; cycle++) {
             await ui.click({ action: 'edit_undo' })
             await ui.wait(async () => await ui.darkPixels() === 0, 'large-canvas Undo removes the stroke')
-            await ui.wait(async () => (await ui.snapshot<{ class: string, swapBytes: number }>()).find(item => item.class === 'KritaTestTileMemory')!.swapBytes > swapBeforeImage, 'new historical pixels actually enter compressed swap')
-            const swapped = (await ui.snapshot()).find(item => item.class === 'KritaTestTileMemory')
             const undone = await documentPixels()
             expect(undone.undoIndex).toBe(before.undoIndex - 1)
             expect(undone.canRedo).toBe(true)
             expect(undone.layerPixels).not.toEqual(before.layerPixels)
+            // Force history eviction AFTER pixel inspection, which can read
+            // tiles back in. No pixel-read snapshot runs before the next Redo.
+            await ui.wait(async () => {
+              const memory = (await ui.snapshot<{ class: string, swapBytes: number, residentHistoryTiles: number }>(false, true)).find(item => item.class === 'KritaTestTileMemory')!
+              return memory.residentHistoryTiles === 0 && memory.swapBytes > swapBeforeImage
+            }, 'the stroke history is swapped out before Redo')
+            const swapped = (await ui.snapshot(false, true)).find(item => item.class === 'KritaTestTileMemory')
             await ui.click({ action: 'edit_redo' })
             // Incremental downsampling can differ by a few antialiased edge pixels.
             // Require visible ink AND exact raw layer bytes rather than a rendered

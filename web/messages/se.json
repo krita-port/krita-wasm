@@ -27,5 +27,6 @@
   "error": "Meattáhus",
   "details": "Bienat",
   "preparing": "Viežžamin…",
-  "starting": "Viežžamin…"
+  "starting": "Viežžamin…",
+  "clearRuntimeCache": "Sihkut páhka gaskarádjosis ja geahččalit fas? Jos viežžan ii lihkostuva, vállje páhka fas. Vurkejuvvon sárgosat seailluhuvvojit."
 }

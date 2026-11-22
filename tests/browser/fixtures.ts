@@ -182,7 +182,7 @@ interface WorkbenchSession {
   server: WebServer
   info?: TestInfo
   temporaryFiles: string[]
-  timeOrigin: number
+  documentId: string
   preferences: Record<string, string | null>
   settingsPosition: { x: number, y: number }
 }
@@ -325,7 +325,7 @@ const test = base.extend<{
             server,
             info,
             temporaryFiles: [],
-            timeOrigin: 0,
+            documentId: '',
             preferences: {},
             settingsPosition: { x: 0, y: 0 },
           }
@@ -344,7 +344,7 @@ const test = base.extend<{
         if (!reused) {
           await ui.start()
           await expect(session.page.locator('#widget-style')).toBeEnabled()
-          session.timeOrigin = await session.page.evaluate(() => performance.timeOrigin)
+          session.documentId = await session.page.evaluate(() => window.kritaWorkbenchDocument = crypto.randomUUID())
           session.preferences = await session.page.evaluate(() => Object.fromEntries([
             'krita.settings-position',
             'krita.widget-style',
@@ -363,7 +363,7 @@ const test = base.extend<{
           await ui.waitForWidgets()
           expect(await ui.documents()).toEqual([])
           await expect(session.page.locator('canvas.qt-window-canvas:visible')).toHaveCount(1)
-          expect(await session.page.evaluate(() => performance.timeOrigin)).toBe(session.timeOrigin)
+          expect(await session.page.evaluate(() => window.kritaWorkbenchDocument)).toBe(session.documentId)
         }
         expect(web.requests.filter(path => path.endsWith('/krita.bundle.tar.gz'))).toHaveLength(reused ? 0 : 1)
         session.uses++
@@ -388,3 +388,58 @@ const test = base.extend<{
   },
 })
 export { expect, test }
+
+// Inspect the actual IDBFS database in a separate readonly transaction. A MEMFS
+// file, a timer callback or an in-memory "saved" flag is not persistence proof.
+export async function stored(page: Page, contents = false, kind: 'recovery' | 'saved' | 'virtual' = 'recovery') {
+  return page.evaluate(async ({ contents, kind }) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(window.kritaRecovery.directory)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    try {
+      const entries = await new Promise<{ key: string, contents?: Uint8Array<ArrayBuffer> | Int8Array<ArrayBuffer>, mode: number }[]>((resolve, reject) => {
+        const transaction = db.transaction('FILE_DATA', 'readonly')
+        const store = transaction.objectStore('FILE_DATA')
+        const keys = store.getAllKeys()
+        const values = store.getAll()
+        transaction.oncomplete = () => resolve(keys.result.map((key, i) => ({
+          key: String(key),
+          ...values.result[i],
+        })))
+        transaction.onerror = () => reject(transaction.error)
+      })
+      const storageRoot = kind === 'recovery'
+        ? window.kritaRecovery.recoveryDirectory
+        : kind === 'virtual'
+          ? `${window.kritaRecovery.directory}/virtual`
+          : window.kritaRecovery.filesStorageDirectory
+      return await Promise.all(entries.filter(entry => entry.contents && entry.key.startsWith(`${storageRoot}/`)
+        && (kind === 'saved'
+          ? /\.(?:kra|png)$/.test(entry.key)
+          : kind === 'recovery'
+            ? entry.key.endsWith('-autosave.kra')
+            : true)).map(async entry => ({
+        path: kind === 'saved'
+          ? window.kritaRecovery.filesDirectory + entry.key.slice(storageRoot.length)
+          : kind === 'virtual'
+            ? entry.key.slice(storageRoot.length)
+            : entry.key,
+        storagePath: entry.key,
+        size: entry.contents!.length,
+        sha256: [
+          ...new Uint8Array(await crypto.subtle.digest('SHA-256', entry.contents!)),
+        ].map(x => x.toString(16).padStart(2, '0')).join(''),
+        ...(contents
+          ? {
+              contents: Array.from(new Uint8Array(entry.contents!)),
+            }
+          : {}),
+      })))
+    }
+    finally {
+      db.close()
+    }
+  }, { contents, kind })
+}

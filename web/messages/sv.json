@@ -27,5 +27,6 @@
   "error": "Fel",
   "details": "Detaljer",
   "preparing": "Läser in…",
-  "starting": "Läser in…"
+  "starting": "Läser in…",
+  "clearRuntimeCache": "Ta bort paketet från cachen och försök igen? Om inläsningen misslyckas, välj ett paket igen. Sparade teckningar behålls."
 }

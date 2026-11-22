@@ -2,7 +2,7 @@
 
 ## Toolchain and dependencies
 
-The application build supports Linux x86-64. Use CMake, Ninja, pkg-config, Python 3.12 or later and Node.js 26 and the pnpm version pinned in `package.json`. The Linux offline-build check uses the system libseccomp runtime through the pinned `pyseccomp` Python package. Emscripten is pinned by `.emscripten-version`; `scripts/with-emsdk` discovers the existing installation from `EMSDK` or `emcc` on `PATH`, checks the version and never installs or activates it.
+The application build supports Linux x86-64. Use CMake 3.19 or later, Ninja, pkg-config, Python 3.12 or later and Node.js 26 and the pnpm version pinned in `package.json`. The Linux offline-build check uses the system libseccomp runtime through the pinned `pyseccomp` Python package. Emscripten is pinned by `.emscripten-version`; `scripts/with-emsdk` discovers the existing installation from `EMSDK` or `emcc` on `PATH`, checks the version and never installs or activates it.
 
 ```sh
 python3 -m venv build/python-checks
@@ -25,7 +25,7 @@ python3 scripts/project.py prepare-source
 python3 scripts/offline-exec.py scripts/package-krita.py --output dist/krita
 ```
 
-The Krita revision is read directly from the clean `krita/` submodule’s `HEAD` and checked against its Git index entry when present. CI initializes the commit pinned by that submodule entry. The preparer archives that commit, validates and applies every patch in `patches/series`, and records the patch digest. It refuses to overwrite an existing prepared tree. After changing patches, run preparation again; byte-identical patched files retain their timestamps and the managed build-source symlink switches to the new tree.
+The Krita revision is read directly from the clean `krita/` submodule’s `HEAD` and checked against its Git index entry when present. CI initializes the commit pinned by that submodule entry. The preparer archives that commit, validates and applies every patch in `patches/series`, and records the patch digest. It refuses to overwrite an existing prepared tree. After changing patches, run preparation again to create the new tree; the command prints its path. During configuration, the managed build-source symlink switches to that tree. Byte-identical files retain their timestamps when the previous tree still matches its recorded inventory.
 
 `BUILD_JOBS=6` is the local default; lower it on small machines. `scripts/build-krita all` configures and builds without packaging. Compilation units and linked archives are audited against Krita, local integration, generated build files and verified prebuilt roots. `offline-exec.py` uses Linux seccomp to deny new IPv4 and IPv6 sockets only in the build process and its children. Build subprocess output is streamed to the caller.
 
@@ -34,12 +34,11 @@ The target is wasm32 with pthreads, growing memory up to 4 GiB, static Qt 6, JSP
 ## Packaging and hosting
 
 ```sh
-python3 scripts/offline-exec.py scripts/package-krita.py --output dist/krita --release-url https://github.com/OWNER/REPOSITORY/releases
 pnpm dev
 pnpm preview
 ```
 
-Use a fresh output directory for each package. Packaging rebuilds first, installs into a temporary disk directory, compiles launcher messages, includes Krita and SDK resources, and creates a deterministic gzip/tar runtime bundle. `dist/krita` supports automatic local loading; `dist/krita/pages` contains only the lightweight manual loader, also distributed as deterministic `krita.pages.tar.gz`. Packaging runs `pnpm build:web` to build `web/index.html`, TypeScript and the separate stylesheet with Vite. It includes the hashed JS/CSS assets and a root-scoped Service Worker in both launchers. `pnpm dev` runs Vite’s development server on port 5173 with frontend updates and automatic loading from the existing runtime package. `pnpm preview` serves the built manual loader on port 4173. Both bind to `0.0.0.0` and fail if the selected port is occupied. Preview aliases only the bundle descriptor to its manual-loading version under `pages/`, so the local runtime download remains available without adding it to the Pages deployment. Set `KRITA_WEB_DIR=dist/another-build` to use another runtime package with either command, and use `--port` to change its port. Relative asset URLs support deployment under a GitHub Pages project path.
+To set the production download link, add `--release-url https://github.com/OWNER/REPOSITORY/releases` to the packaging command above. Use a fresh output directory outside `web/`, `src/`, `krita/`, `build/sources/`, and `build/web/` for each package. Packaging rebuilds first, installs into a temporary disk directory, compiles launcher messages, includes Krita and SDK resources, and creates a deterministic gzip/tar runtime bundle. `dist/krita` supports automatic local loading; `dist/krita/pages` contains only the lightweight manual loader, also distributed as deterministic `krita.pages.tar.gz`. Packaging runs `pnpm build:web` to build `web/index.html`, TypeScript and the separate stylesheet with Vite. It includes the hashed JS/CSS assets and a root-scoped Service Worker in both launchers. `pnpm dev` runs Vite’s development server on port 5173 with frontend updates and automatic loading from the existing runtime package. `pnpm preview` serves the built manual loader on port 4173. Both bind to `0.0.0.0` and fail if the selected port is occupied. Preview uses a manual-loading descriptor with a download link to its local archive, independently of the production Release URL; the archive remains absent from the Pages deployment. Set `KRITA_WEB_DIR=dist/another-build` to use another runtime package with either command, and use `--port` to change its port. Relative asset URLs support deployment under a GitHub Pages project path.
 
 Project-added messages for every bundled Krita locale, including region and script variants, are maintained in separate `web/messages/<locale>.json` files. Packaging merges them and rejects missing languages, incomplete keys, empty values and mismatched placeholders, then generates both native `krita-wasm.mo` catalogs and the webpage index. Existing translated Krita labels take precedence over project fallbacks. A small `i18n.json` is also included in the Pages loader so its instructions are translated before a runtime is imported. New translations have not yet received native-speaker review.
 
@@ -65,6 +64,8 @@ python3 -m unittest discover -s tests -v
 npx playwright install chromium firefox webkit
 pnpm test:browser
 ```
+
+On Linux, browser installation also requires system runtime libraries. Run `npx playwright install-deps --dry-run chromium firefox webkit` to inspect the required packages, then install missing ones with your distribution package manager (`sudo apt install ...` on Ubuntu). The browser download command above does not install system libraries.
 
 The browser suite uses up to three workers. CI retries a failed case up to three times, for at most four attempts; a case that passes on retry is reported as flaky without failing CI. Local runs do not retry. The per-test budget is 240 seconds, including setup. Navigation has a 60-second limit, application startup and bridge readiness have 90 seconds, and ordinary assertions and actions have 30 seconds. Native import and save completion waits retain 180 seconds. Individual waits share the remaining test budget.
 

@@ -42,3 +42,6 @@ upstream-fixes/0041-resource-chooser-preserve-destroyed-connections.patch
 upstream-fixes/0042-mime-prioritize-KRA-content-over-generic-ZIP.patch
 port/0043-wasm-complete-manual-saves-after-cache-commit.patch
 upstream-fixes/0044-cancel-expired-synchronized-notifications.patch
+port/0045-wasm-use-pinned-revision-in-version-metadata.patch
+upstream-fixes/0046-save-next-incremental-backup-before-overwriting.patch
+upstream-fixes/0047-file-layer-use-absolute-base-for-untitled-images.patch

@@ -27,5 +27,6 @@
   "error": "Error",
   "details": "Detalles",
   "preparing": "Cargando…",
-  "starting": "Cargando…"
+  "starting": "Cargando…",
+  "clearRuntimeCache": "¿Eliminar el paquete en caché y volver a intentarlo? Si la carga falla, seleccione un paquete de nuevo. Se conservarán los dibujos guardados."
 }

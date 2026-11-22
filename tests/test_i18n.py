@@ -59,7 +59,7 @@ class TranslationTest(unittest.TestCase):
                 ):
                     i18n_index.load_messages(["fr"])
 
-    def test_upstream_labels_survive_custom_english_and_missing_catalog_entries(
+    def test_upstream_labels_preserve_context_and_project_appearance_meanings(
         self,
     ) -> None:
         # A real GNU MO fixture exercises contextual lookup, UTF-8 and mnemonics.
@@ -69,9 +69,14 @@ class TranslationTest(unittest.TestCase):
             [
                 polib.POEntry(msgid="Appearance", msgstr="&Aspect du catalogue"),
                 polib.POEntry(
-                    msgid="Light", msgstr="&Clair du catalogue", msgctxt="button"
+                    msgid="Light",
+                    msgstr="&Couleurs claires",
+                    msgctxt="Color palette shade",
                 ),
                 polib.POEntry(msgid="Close", msgstr="&Fermer"),
+                polib.POEntry(
+                    msgid="Details", msgstr="Détaillé", msgctxt="Resource view mode"
+                ),
             ]
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -82,9 +87,10 @@ class TranslationTest(unittest.TestCase):
             result = i18n_index.build_index(share)
         french = result["messages"]["fr"]
         self.assertEqual(french["appearance"], "Aspect du catalogue")
-        self.assertEqual(french["light"], "Clair du catalogue")
+        self.assertEqual(french["light"], "Clair")
         self.assertEqual(french["close"], "Fermer")
         self.assertEqual(french["dark"], "Sombre")
+        self.assertEqual(french["details"], "Détails")
         self.assertEqual(french["automatic"], "Automatique")
         self.assertEqual(french["openDevice"], "Ouvrir depuis l’appareil")
         self.assertEqual(result["messages"]["en"]["appearance"], "Appearance")

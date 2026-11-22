@@ -5,6 +5,7 @@ export interface KritaModule {
   IDBFS: Emscripten.FileSystemType
   addRunDependency: typeof addRunDependency
   removeRunDependency: typeof removeRunDependency
+  _kritaWasmRelocateRecoveries: () => number
   _kritaWasmTestSnapshot: (includePixels: number) => void
   _kritaWasmSetWidgetStyle: (index: number) => number
   _kritaWasmSetColorScheme: (value: number) => number
@@ -26,14 +27,14 @@ export interface LanguageIndex {
   messages: Record<string, Record<string, string>>
 }
 declare global {
-  var kritaChooseFile: (directory: string, title: string) => Promise<string | null>
+  var kritaChooseFiles: (directory: string, title: string) => Promise<string[] | null>
   var kritaRecovery: RecoveryState
   var kritaPalette: Palette | undefined
   var kritaWidgetStyleState: { available: string[], current: string, qtStyle: string } | undefined
   var kritaStartupWarnings: string[]
   var kritaTestFS: typeof FS
   var kritaWidgetSnapshot: { class: string }[]
-  var kritaTestSnapshot: (includePixels?: boolean) => { class: string }[]
+  var kritaTestSnapshot: (includePixels?: boolean, swapHistory?: boolean) => { class: string }[]
   var kritaWasm: unknown
   function qtLoad(options: {
     print: (message: unknown) => void
@@ -49,6 +50,7 @@ declare global {
     }
   }): Promise<KritaModule>
   interface WindowEventMap {
+    'krita-ready': Event
     'krita-language-change': CustomEvent<string[] | null>
     'krita-palette-change': Event
     'krita-widget-style-change': Event

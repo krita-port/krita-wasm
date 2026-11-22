@@ -27,5 +27,6 @@
   "error": "Erreur",
   "details": "Détails",
   "preparing": "Chargement…",
-  "starting": "Chargement…"
+  "starting": "Chargement…",
+  "clearRuntimeCache": "Supprimer le paquet en cache et réessayer ? Si le chargement échoue, sélectionnez à nouveau un paquet. Les dessins enregistrés sont conservés."
 }

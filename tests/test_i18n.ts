@@ -13,6 +13,9 @@ const available = [
   'uz@cyrillic',
   'ca',
   'ca@valencia',
+  'pa',
+  'nb',
+  'nn',
 ]
 for (const [requested, expected] of [
   ['zh-CN', 'zh_CN'],
@@ -21,16 +24,38 @@ for (const [requested, expected] of [
   ['zh-TW', 'zh_TW'],
   ['zh-Hant', 'zh_TW'],
   ['zh-HK', 'zh_TW'],
+  ['zh-US', 'zh_TW'],
+  ['zh-GB', 'zh_TW'],
+  ['zh-Latn-pinyin', null],
+  ['pa-PK', null],
+  ['pa-Arab-PK', null],
+  ['pa-IN', 'pa'],
+  ['no-NO', 'nb'],
+  ['nn-NO', 'nn'],
   ['pt-BR', 'pt_BR'],
+  ['pt-BR-fonipa', 'pt_BR'],
+  ['pt-Latn-BR-fonipa', 'pt_BR'],
+  ['pt-Latn-BR', 'pt_BR'],
+  ['pt-BR-u-nu-latn', 'pt_BR'],
   ['pt-PT', 'pt'],
   ['fr-CA', 'fr'],
   ['uz-Cyrl-UZ', 'uz@cyrillic'],
   ['ca-valencia', 'ca@valencia'],
+  ['ca-ES-valencia', 'ca@valencia'],
+  ['ca-Latn-ES-valencia', 'ca@valencia'],
+  ['ca-Latn-valencia', 'ca@valencia'],
   ['en-AU', 'en'],
   ['en-GB', 'en_GB'],
   ['../../zh_CN', null],
   ['invalid!!!', null],
 ] as const) assert.equal(matchLanguage(requested, ['en', ...available]), expected, requested)
+assert.deepEqual(resolveLanguages(['en_GB', 'fr'], [], available), ['en_GB', 'fr', 'en'])
+assert.deepEqual(resolveLanguages(['en', 'fr'], [], available), ['en', 'fr'])
+assert.deepEqual(resolveLanguages(['pt_BR', 'fr'], [], available), ['pt_BR', 'fr', 'en'])
+assert.deepEqual(resolveLanguages(null, ['pa-PK', 'en-US'], available), ['en'])
+assert.deepEqual(resolveLanguages(null, ['zh-Latn-pinyin', 'en'], available), ['en'])
+assert.deepEqual(resolveLanguages(null, ['zh-US', 'en-US'], available), ['zh_TW', 'en'])
+assert.deepEqual(resolveLanguages(null, ['uz-Cyrl-UZ', 'fr'], available), ['uz@cyrillic', 'fr', 'en'])
 assert.equal(languageTag('uz@cyrillic'), 'uz-Cyrl')
 assert.equal(languageTag('ca@valencia'), 'ca-valencia')
 assert.deepEqual(resolveLanguages(null, ['xx-ZZ', 'pt-BR', 'fr-CA'], available), ['pt_BR', 'pt', 'fr', 'en'])

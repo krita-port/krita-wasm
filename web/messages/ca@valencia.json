@@ -27,5 +27,6 @@
   "error": "Error",
   "details": "Detalls",
   "preparing": "S’està carregant…",
-  "starting": "S’està carregant…"
+  "starting": "S’està carregant…",
+  "clearRuntimeCache": "Voleu eliminar el paquet de la memòria cau i tornar-ho a provar? Si la càrrega falla, seleccioneu un paquet de nou. Es conserven els dibuixos desats."
 }

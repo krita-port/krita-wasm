@@ -130,14 +130,40 @@ diff --git a/libs/ui/KisApplication.cpp b/libs/ui/KisApplication.cpp
      // Check for autosave files that can be restored, if we're not running a batch run (test)
      if (!d->batchRun) {
          checkAutosaveFiles();
-@@ -1226,6 +1232,10 @@
-         delete d->autosaveDialog;
-         d->autosaveDialog = nullptr;
-     }
+@@ -1194,14 +1200,35 @@
+             hideSplashScreen();
+         }
+         d->autosaveDialog = new KisAutoSaveRecoveryDialog(autosaveFiles, activeWindow());
+-        QDialog::DialogCode result = (QDialog::DialogCode) d->autosaveDialog->exec();
++        QDialog::DialogCode result;
++        for (;;) {
++            result = static_cast<QDialog::DialogCode>(d->autosaveDialog->exec());
 +#ifdef Q_OS_WASM
-+    extern void kritaWasmSyncRecovery();
-+    kritaWasmSyncRecovery();
++            if (result == QDialog::Accepted) {
++                const QStringList selected = d->autosaveDialog->recoverableFiles();
++                QStringList discarded;
++                for (const auto &file : autosaveFiles) {
++                    if (!selected.contains(file))
++                        discarded.append(dir.absoluteFilePath(file));
++                }
++                extern bool kritaWasmDiscardRecoveries(const QStringList &);
++                if (!kritaWasmDiscardRecoveries(discarded)) {
++                    QMessageBox::warning(d->autosaveDialog, i18n("Krita"), i18n("Could not remove the autosave file."));
++                    continue;
++                }
++            }
 +#endif
- }
++            break;
++        }
  
- bool KisApplication::createNewDocFromTemplate(const QString &fileName, KisMainWindow *mainWindow)
+         if (result == QDialog::Accepted) {
+             QStringList filesToRecover = d->autosaveDialog->recoverableFiles();
+             Q_FOREACH (const QString &autosaveFile, autosaveFiles) {
+                 if (!filesToRecover.contains(autosaveFile)) {
+                     KisUsageLogger::log(QString("Removing autosave file %1").arg(dir.absolutePath() + "/" + autosaveFile));
++#ifndef Q_OS_WASM
+                     QFile::remove(dir.absolutePath() + "/" + autosaveFile);
++#endif
+                 }
+             }
+             autosaveFiles = filesToRecover;

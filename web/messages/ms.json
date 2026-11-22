@@ -27,5 +27,6 @@
   "error": "Ralat",
   "details": "Butiran",
   "preparing": "Memuatkan…",
-  "starting": "Memuatkan…"
+  "starting": "Memuatkan…",
+  "clearRuntimeCache": "Buang pakej masa jalan dalam cache dan cuba lagi? Jika pemuatan gagal, pilih pakej semula. Lukisan yang disimpan dikekalkan."
 }

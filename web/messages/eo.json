@@ -27,5 +27,6 @@
   "error": "Eraro",
   "details": "Detaloj",
   "preparing": "Ŝargante…",
-  "starting": "Ŝargante…"
+  "starting": "Ŝargante…",
+  "clearRuntimeCache": "Ĉu forigi la kaŝmemorigitan rulmedion kaj reprovi? Se la ŝargo malsukcesas, elektu pakaĵon denove. Konservitaj desegnaĵoj restas."
 }

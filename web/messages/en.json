@@ -27,5 +27,6 @@
   "error": "Error",
   "details": "Details",
   "preparing": "Preparing Krita…",
-  "starting": "Starting Krita…"
+  "starting": "Starting Krita…",
+  "clearRuntimeCache": "Remove the cached runtime and retry? If loading fails, select a bundle again. Saved drawings are kept."
 }

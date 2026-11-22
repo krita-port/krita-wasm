@@ -1,0 +1,48 @@
+Subject: [PATCH] Build incremental backup names from basenames and check copies
+
+When editing an incremental backup, derive the next backup name from its basename rather than joining an absolute filename to its directory again. Abort both incremental-backup paths if the previous bytes cannot be copied, before overwriting the current file. The behavior is shared by desktop and Wasm.
+
+Related upstream issue: https://bugs.kde.org/show_bug.cgi?id=421792
+That report fixed filename-only matching for incremental paths; its official issue and comments were inspected. The opened-backup branch still used a full path and ignored copy failures in the pinned revision. Searches found no separate report for these remaining failures.
+
+diff --git a/libs/ui/KisViewManager.cpp b/libs/ui/KisViewManager.cpp
+--- a/libs/ui/KisViewManager.cpp
++++ b/libs/ui/KisViewManager.cpp
+@@ -1107,7 +1107,7 @@
+         int intVersion = version.toInt(0);
+         ++intVersion;
+         QString baseNewVersion = QString::number(intVersion);
+-        QString backupFileName = document()->localFilePath();
++        QString backupFileName = fileName;
+         while (baseNewVersion.length() < version.length()) {
+             baseNewVersion.prepend("0");
+         }
+@@ -1135,7 +1135,12 @@
+             QMessageBox::critical(mainWindow(), i18nc("@title:window", "Couldn't save incremental backup"), i18n("Alternative names exhausted, try manually saving with a higher number"));
+             return;
+         }
+-        QFile::copy(path + '/' + fileName, path + '/' + backupFileName);
++        if (!QFile::copy(path + '/' + fileName, path + '/' + backupFileName)) {
++            QMessageBox::critical(mainWindow(),
++                                  i18nc("@title:window", "Couldn't save incremental backup"),
++                                  i18n("Could not save %1.", path + '/' + backupFileName));
++            return;
++        }
+         document()->saveAs(path + '/' + fileName, document()->mimeType(), true);
+     }
+     else { // if NOT working on a backup...
+@@ -1169,8 +1174,13 @@
+         } while (fileAlreadyExists);
+ 
+         // Save both as backup and on current file for interapplication workflow
++        if (!QFile::copy(path + '/' + fileName, path + '/' + backupFileName)) {
++            QMessageBox::critical(mainWindow(),
++                                  i18nc("@title:window", "Couldn't save incremental backup"),
++                                  i18n("Could not save %1.", path + '/' + backupFileName));
++            return;
++        }
+         document()->setFileBatchMode(true);
+-        QFile::copy(path + '/' + fileName, path + '/' + backupFileName);
+         document()->saveAs(path + '/' + fileName, document()->mimeType(), true);
+         document()->setFileBatchMode(false);
+     }

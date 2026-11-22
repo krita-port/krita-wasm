@@ -27,5 +27,6 @@
   "error": "Chyba",
   "details": "Podrobnosti",
   "preparing": "Načítání…",
-  "starting": "Načítání…"
+  "starting": "Načítání…",
+  "clearRuntimeCache": "Odstranit balíček z mezipaměti a zkusit to znovu? Pokud načítání selže, vyberte balíček znovu. Uložené kresby zůstanou zachovány."
 }

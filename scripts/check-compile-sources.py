@@ -49,10 +49,19 @@ def main() -> None:
         for line in (build / "build.ninja").read_text().splitlines():
             if not line.startswith("  LINK_LIBRARIES = "):
                 continue
-            for token in shlex.split(line.partition(" = ")[2]):
+            # Ninja doubles literal dollar signs before shell interpretation.
+            for token in shlex.split(line.partition(" = ")[2].replace("$$", "$")):
+                if token.startswith("-"):
+                    # These are the compiler runtime components used by this build.
+                    if token not in {"-lm", "-lembind", "-lidbfs.js"}:
+                        raise SystemExit(
+                            f"Unverified linker library option: {token}. "
+                            "Use explicit archive/object paths under the verified roots."
+                        )
+                    continue
                 path = Path(token)
-                if path.is_absolute() and path.suffix in (".a", ".o"):
-                    libraries.add(path.resolve())
+                if path.suffix in (".a", ".o"):
+                    libraries.add((build / path).resolve())
         escaped = sorted(
             path
             for path in libraries

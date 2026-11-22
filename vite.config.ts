@@ -1,6 +1,8 @@
+import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import sirv from 'sirv'
 import { defineConfig } from 'vite'
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url))
@@ -36,7 +38,9 @@ export default defineConfig(({ isPreview, mode }) => ({
     strictPort: true,
     headers: { 'Cache-Control': 'no-store' },
     fs: {
-      allow: [projectRoot, runtimeDirectory],
+      allow: [
+        resolve(projectRoot, 'web'),
+      ],
     },
   },
   preview: {
@@ -51,6 +55,7 @@ export default defineConfig(({ isPreview, mode }) => ({
     {
       name: 'packaged-krita',
       configureServer({ middlewares }) {
+        const serveRuntime = sirv(runtimeDirectory, { dev: true, extensions: [] })
         middlewares.use((request, response, next) => {
           if (request.url === '/isolation-sw.js')
             request.url = '/isolation-sw.ts?worker_file&type=classic'
@@ -58,15 +63,26 @@ export default defineConfig(({ isPreview, mode }) => ({
             response.setHeader('Content-Type', 'application/gzip')
             response.setHeader('Content-Encoding', 'identity')
           }
-          if (['/bundle.json', '/i18n.json', '/krita.bundle.tar.gz'].includes(request.url || ''))
-            request.url = `/@fs${resolve(runtimeDirectory, request.url!.slice(1))}`
+          if (['/bundle.json', '/i18n.json', '/krita.bundle.tar.gz'].includes(request.url || '')) {
+            serveRuntime(request, response, next)
+            return
+          }
           next()
         })
       },
-      configurePreviewServer({ middlewares }) {
+      configurePreviewServer({ config, middlewares }) {
         middlewares.use((request, response, next) => {
-          if (mode === 'manual' && request.url === '/bundle.json')
-            request.url = '/pages/bundle.json'
+          if (mode === 'manual' && request.url === '/bundle.json') {
+            void readFile(resolve(config.root, config.build.outDir, 'pages/bundle.json'), 'utf8').then((text) => {
+              response.setHeader('Content-Type', 'application/json')
+              response.setHeader('Cache-Control', 'no-store')
+              response.end(JSON.stringify({
+                ...JSON.parse(text),
+                release_url: './krita.bundle.tar.gz',
+              }))
+            }).catch(next)
+            return
+          }
           if (request.url === '/krita.bundle.tar.gz') {
             // Keep the archive opaque rather than advertising HTTP gzip encoding.
             response.setHeader('Content-Type', 'application/gzip')

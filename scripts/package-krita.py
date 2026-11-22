@@ -2,6 +2,7 @@
 """Build Krita against the frozen SDK and stage local static web files."""
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -30,13 +31,74 @@ def main() -> None:
         help="HTTPS Release download or Releases page URL shown by the manual loader",
     )
     args = parser.parse_args()
-    if args.release_url and urlsplit(args.release_url).scheme != "https":
-        raise ValueError("Release links require HTTPS")
+    if args.release_url:
+        try:
+            release_url = urlsplit(args.release_url)
+            _ = release_url.port  # Validate optional port syntax and range.
+            if release_url.scheme != "https" or not release_url.hostname:
+                raise ValueError("expected an absolute HTTPS URL")
+        except ValueError as error:
+            parser.error(f"Invalid --release-url: {error}")
     output = args.output.resolve()
+    if any(
+        output.is_relative_to(ROOT / name)
+        for name in ("web", "src", "krita", "build/sources", "build/web")
+    ):
+        raise ValueError(
+            "Package output must be outside source and generated frontend trees"
+        )
     if output.exists():
         raise ValueError(f"Refusing to overwrite existing output: {output}")
+    lock_path = ROOT / "build/cmake/krita.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("w") as build_lock:
+        try:
+            fcntl.flock(build_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError("Another Krita build is using this checkout") from error
+        with tempfile.TemporaryDirectory(
+            prefix=".frontend-", dir=lock_path.parent
+        ) as temporary:
+            package(
+                output, args.release_url, build_lock.fileno(), Path(temporary) / "web"
+            )
+
+
+def application_inputs() -> dict[str, str]:
+    return {
+        path.relative_to(ROOT).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(
+            [
+                *(ROOT / "src").rglob("*"),
+                *(ROOT / "web").rglob("*"),
+                *(ROOT / "locks").glob("*.json"),
+                *ROOT.glob("tsconfig*.json"),
+                ROOT / "vite.config.ts",
+                ROOT / "package.json",
+                ROOT / "pnpm-lock.yaml",
+                ROOT / ".emscripten-version",
+                ROOT / ".gitmodules",
+                *(ROOT / "scripts").glob("*"),
+                ROOT / "patches/series",
+                *(ROOT / "patches").rglob("*.patch"),
+            ]
+        )
+        if path.is_file()
+    }
+
+
+def package(
+    output: Path, release_url: str | None, lock_fd: int, frontend: Path
+) -> None:
+    inputs = application_inputs()
     # Downloads belong to the explicit fetch step, before the frozen build.
-    subprocess.run(["pnpm", "build:web"], cwd=ROOT, check=True)
+    # A normal build:web invocation can empty its default output at any time.
+    # Both launchers use this invocation's private, completed frontend tree.
+    subprocess.run(
+        ["pnpm", "build:web", "--outDir", str(frontend)], cwd=ROOT, check=True
+    )
+    dependency_release = sdk.release()
+    os.environ["KRITA_SDK_RELEASE"] = json.dumps(dependency_release)
     os.environ.update(
         {
             "KRITA_SDK_DIR": str(sdk.prefix("sdk")),
@@ -51,8 +113,14 @@ def main() -> None:
     # Upstream mixes runtime data with development archives in one component.
     # Build the configured Krita targets before installing, then discard the
     # non-runtime archives from the static web bundle.
-    subprocess.run([str(ROOT / "scripts/build-krita"), "all"], check=True)
+    subprocess.run(
+        [str(ROOT / "scripts/build-krita"), "all"],
+        check=True,
+        pass_fds=(lock_fd,),
+        env={**os.environ, "KRITA_BUILD_LOCK_FD": str(lock_fd)},
+    )
     source = project.verified_source_path()
+    source_manifest = (source / ".krita-wasm-source.json").read_bytes()
     sdk_path = Path(os.environ["KRITA_SDK_DIR"]).resolve(strict=True)
     build = ROOT / "build/cmake" / f"krita-{sdk_path.name}-wasm"
     alias = ROOT / "build/sources/krita-build-current"
@@ -80,7 +148,7 @@ def main() -> None:
         )
         i18n_index.compile_native_messages(install / "share", i18n / "host/bin/msgfmt")
         web = staging / "web"
-        shutil.copytree(ROOT / "build/web", web)
+        shutil.copytree(frontend, web)
         for name in ("krita.js", "krita.wasm", "qtloader.js"):
             shutil.copyfile(build / "bin" / name, web / name)
         shutil.copyfile(ROOT / "LICENSE", web / "COPYING")
@@ -137,13 +205,16 @@ def main() -> None:
                 "Installed application is missing compiled Krita translations"
             )
         (web / "i18n.json").write_text(
-            json.dumps(index, ensure_ascii=False, indent=2) + "\n"
+            json.dumps(index, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
         )
         sdk_target = json.loads((sdk_path / "sdk.json").read_text())["target"]
         (web / "runtime.json").write_text(
             json.dumps(
                 {
                     "jspi": bool(sdk_target.get("jspi")),
+                    "startup_event": "krita-ready",
+                    "file_dialog": "linked-batch",
                     "cxx_exceptions": sdk_target.get("cxx_exceptions", "emscripten-js"),
                 }
             )
@@ -171,7 +242,7 @@ def main() -> None:
             "mode": "auto",
             "filename": payload.name,
             "cache_version": payload_hash,
-            "release_url": args.release_url,
+            "release_url": release_url,
         }
         (web / "bundle.json").write_text(
             json.dumps(descriptor, indent=2, sort_keys=True) + "\n"
@@ -179,7 +250,7 @@ def main() -> None:
         # Only the loader belongs on Pages. The release archive is deliberately
         # absent from this directory, including when it is served locally.
         pages = web / "pages"
-        shutil.copytree(ROOT / "build/web", pages)
+        shutil.copytree(frontend, pages)
         for name in ("i18n.json", "COPYING"):
             shutil.copyfile(web / name, pages / name)
         manual = {
@@ -208,10 +279,23 @@ def main() -> None:
                     hashes[path.relative_to(web).as_posix()] = hashlib.file_digest(
                         stream, "sha256"
                     ).hexdigest()
+        if application_inputs() != inputs:
+            raise ValueError(
+                "Application inputs changed during packaging; output was not published"
+            )
+        if (
+            project.verified_source_path() != source
+            or (source / ".krita-wasm-source.json").read_bytes() != source_manifest
+            or not alias.is_symlink()
+            or alias.resolve() != source
+        ):
+            raise ValueError(
+                "Prepared source changed during packaging; output was not published"
+            )
         manifest = {
             "status": "packaged application; see validation reports for acceptance",
-            "source": json.loads((source / ".krita-wasm-source.json").read_text()),
-            "dependency_release": sdk.release(),
+            "source": json.loads(source_manifest),
+            "dependency_release": dependency_release,
             "sdk": json.loads((sdk_path / "sdk.json").read_text())["target"],
             "sdk_inventory_sha256": hashlib.sha256(
                 (sdk_path / "sdk.json").read_bytes()
@@ -220,26 +304,7 @@ def main() -> None:
             "i18n_inventory_sha256": hashlib.sha256(
                 (i18n / "sdk.json").read_bytes()
             ).hexdigest(),
-            "application_inputs": {
-                path.relative_to(ROOT).as_posix(): hashlib.sha256(
-                    path.read_bytes()
-                ).hexdigest()
-                for path in sorted(
-                    [
-                        *(ROOT / "src").rglob("*"),
-                        *(ROOT / "web").rglob("*"),
-                        *(ROOT / "locks").glob("*.json"),
-                        *ROOT.glob("tsconfig*.json"),
-                        ROOT / "vite.config.ts",
-                        ROOT / "package.json",
-                        ROOT / "pnpm-lock.yaml",
-                        ROOT / ".emscripten-version",
-                        ROOT / ".gitmodules",
-                        *(ROOT / "scripts").glob("*"),
-                    ]
-                )
-                if path.is_file()
-            },
+            "application_inputs": inputs,
             "cmake_cache_sha256": hashlib.sha256(
                 (build / "CMakeCache.txt").read_bytes()
             ).hexdigest(),
@@ -248,7 +313,17 @@ def main() -> None:
         (web / "build.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n"
         )
-        web.rename(output)
+        # Reserve the fresh destination atomically before publishing. An empty
+        # directory created by someone else during the build is not ours.
+        output.mkdir()
+        try:
+            web.rename(output)
+        except BaseException:
+            try:
+                output.rmdir()
+            except OSError:
+                pass  # Preserve any content another process placed here.
+            raise
     print(output)
 
 

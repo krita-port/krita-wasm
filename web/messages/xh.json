@@ -27,5 +27,6 @@
   "error": "Impazamo",
   "details": "Iinkcukacha",
   "preparing": "Iyalayisha…",
-  "starting": "Iyalayisha…"
+  "starting": "Iyalayisha…",
+  "clearRuntimeCache": "Susa iphakheji egciniweyo uze uzame kwakhona? Ukuba ukulayisha kuyasilela, khetha iphakheji kwakhona. Imizobo egciniweyo iya kugcinwa."
 }

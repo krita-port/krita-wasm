@@ -76,13 +76,17 @@ class KritaUI {
         error: String(error),
       })))
     }
-    await this.wait(() => this.page.evaluate(() => typeof window.kritaTestSnapshot === 'function'), 'Qt widget snapshot bridge')
+    await this.wait(() => this.page.evaluate(() => typeof window.kritaTestSnapshot === 'function'), 'Qt widget snapshot bridge', 90_000)
+    // The server receives readiness logs from every tab. A previous window
+    // must not make this page appear ready before its own app initialized.
+    await this.wait(() => this.state(), 'this page application state', 90_000)
+    await expect(this.page.locator('#status')).toBeHidden({ timeout: 90_000 })
     expect(this.web.requests.filter(path => path.includes('/assets/') && !/\.(?:js|css)$/.test(path))).toEqual([])
     expect(this.web.requests.filter(path => path.endsWith('/krita.bundle.tar.gz')).length).toBeLessThanOrEqual(1)
   }
 
-  async snapshot<T extends SnapshotRecord = WidgetSnapshot>(includePixels = false): Promise<T[]> {
-    return this.page.evaluate(flag => window.kritaTestSnapshot(flag), includePixels) as Promise<T[]>
+  async snapshot<T extends SnapshotRecord = WidgetSnapshot>(includePixels = false, swapHistory = false): Promise<T[]> {
+    return this.page.evaluate(([pixels, swap]) => window.kritaTestSnapshot(pixels, swap), [includePixels, swapHistory]) as Promise<T[]>
   }
 
   async find(fields: Partial<WidgetSnapshot>) {
@@ -132,7 +136,15 @@ class KritaUI {
       const widget = await this.find(fields)
       return widget && widget.enabled !== false
     }, `enabled Qt control ${JSON.stringify(fields)}`)
-    const point = await this.center(await this.find(fields))
+    const widget = await this.find(fields)
+    const point = await this.center(widget)
+    if (widget?.class === 'QCheckBox') {
+      // Qt's click rectangle covers the indicator/label, not stretched padding.
+      const rtl = await this.page.locator('html').getAttribute('dir') === 'rtl'
+      point[0] += (rtl
+        ? 1
+        : -1) * (widget.width / 2 - 8)
+    }
     const settings = this.page.locator('#settings-toggle')
     const box = (await settings.boundingBox())!
     // In RTL layouts the floating gear can cover the New toolbar button.
@@ -168,29 +180,35 @@ class KritaUI {
     }
   }
 
-  async chooseDeviceFile(path: string, method: 'picker' | 'drop' = 'picker') {
+  async chooseDeviceFile(path: string | string[], method: 'picker' | 'drop' = 'picker') {
     const dialog = this.page.locator('#file-open')
     await expect(dialog).toBeVisible()
     if (method === 'picker') {
+      await expect(this.page.locator('#device-file')).toBeEnabled()
       const pending = this.page.waitForEvent('filechooser')
-      await this.page.locator('#device-file').click()
+      await this.page.locator('#device-choose').click()
       await (await pending).setFiles(path)
     }
     else {
-      await this.page.evaluate(({ name, bytes }) => {
+      const paths = Array.isArray(path)
+        ? path
+        : [path]
+      await this.page.evaluate((files) => {
         const transfer = new DataTransfer()
-        transfer.items.add(new File([
-          new Uint8Array(bytes),
-        ], name))
+        for (const { name, bytes } of files) {
+          transfer.items.add(new File([
+            new Uint8Array(bytes),
+          ], name))
+        }
         document.querySelector('#device-drop')!.dispatchEvent(new DragEvent('drop', {
           bubbles: true,
           cancelable: true,
           dataTransfer: transfer,
         }))
-      }, {
+      }, paths.map(path => ({
         name: basename(path),
         bytes: Array.from(readFileSync(path)),
-      })
+      })))
     }
     await expect(dialog).not.toBeVisible()
   }

@@ -27,5 +27,6 @@
   "error": "Error",
   "details": "Detalhs",
   "preparing": "Cargament…",
-  "starting": "Cargament…"
+  "starting": "Cargament…",
+  "clearRuntimeCache": "Suprimir lo paquet en cache e tornar ensajar ? Se lo cargament fracassa, seleccionatz un paquet tornarmai. Los dessenhs enregistrats son conservats."
 }

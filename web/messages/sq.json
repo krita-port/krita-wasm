@@ -27,5 +27,6 @@
   "error": "Gabim",
   "details": "Hollësi",
   "preparing": "Po ngarkohet…",
-  "starting": "Po ngarkohet…"
+  "starting": "Po ngarkohet…",
+  "clearRuntimeCache": "Të hiqet paketa nga memoria e fshehtë dhe të provohet përsëri? Nëse ngarkimi dështon, zgjidhni një paketë përsëri. Vizatimet e ruajtura mbeten."
 }

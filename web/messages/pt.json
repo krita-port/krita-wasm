@@ -27,5 +27,6 @@
   "error": "Erro",
   "details": "Detalhes",
   "preparing": "A carregar…",
-  "starting": "A carregar…"
+  "starting": "A carregar…",
+  "clearRuntimeCache": "Remover o pacote em cache e tentar novamente? Se o carregamento falhar, selecione novamente um pacote. Os desenhos gravados serão mantidos."
 }

@@ -27,5 +27,6 @@
   "error": "Kļūda",
   "details": "Sīkāka informācija",
   "preparing": "Ielādē…",
-  "starting": "Ielādē…"
+  "starting": "Ielādē…",
+  "clearRuntimeCache": "Noņemt pakotni no kešatmiņas un mēģināt vēlreiz? Ja ielāde neizdodas, atlasiet pakotni vēlreiz. Saglabātie zīmējumi tiks paturēti."
 }

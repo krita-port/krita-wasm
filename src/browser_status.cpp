@@ -105,6 +105,7 @@ void kritaWasmScheduleStatus() {
         if (!window || !window->isVisible()) {
             std::fputs("Krita Wasm: no visible main window\n", stderr);
             EM_ASM({
+                window.dispatchEvent(new CustomEvent('krita-startup-failed', { detail: 'No visible Krita window' }));
                 if (new URLSearchParams(location.search).has('test'))
                     fetch('/__probe_result?status=FAIL:%20No%20visible%20Krita%20window');
             });
@@ -114,8 +115,7 @@ void kritaWasmScheduleStatus() {
         std::puts("KRITA_WASM_WINDOW_READY: real main window is visible");
         EM_ASM({
             document.title = 'Krita';
-            const status = document.getElementById('status');
-            if (status) status.hidden = true;
+            window.dispatchEvent(new Event('krita-ready'));
             if (new URLSearchParams(location.search).has('test'))
                 fetch('/__probe_result?status=KRITA_WASM_WINDOW_READY');
         });

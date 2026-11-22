@@ -27,5 +27,6 @@
   "error": "Fehler",
   "details": "Enkelheiten",
   "preparing": "An't Laden…",
-  "starting": "An't Laden…"
+  "starting": "An't Laden…",
+  "clearRuntimeCache": "Dat Paket ut den Twischenspieker wegmaken un nochmaal versöken? Wenn dat Laden fehlsleit, söök en Paket nochmaal ut. Sekerte Teken blievt wohren."
 }

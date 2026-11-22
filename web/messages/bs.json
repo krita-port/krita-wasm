@@ -27,5 +27,6 @@
   "error": "Greška",
   "details": "Detalji",
   "preparing": "Učitavanje…",
-  "starting": "Učitavanje…"
+  "starting": "Učitavanje…",
+  "clearRuntimeCache": "Ukloniti paket iz keša i pokušati ponovo? Ako učitavanje ne uspije, ponovo odaberite paket. Sačuvani crteži ostaju."
 }

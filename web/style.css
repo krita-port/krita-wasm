@@ -58,6 +58,12 @@ a {
   overflow: hidden;
 }
 
+body:has(#failure:not([hidden])) #status {
+  position: static;
+  flex-shrink: 0;
+  overflow-wrap: anywhere;
+}
+
 #failure {
   padding: 0 12px 12px;
 }

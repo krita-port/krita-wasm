@@ -27,5 +27,6 @@
   "error": "錯誤",
   "details": "詳細資訊",
   "preparing": "正在載入…",
-  "starting": "正在載入…"
+  "starting": "正在載入…",
+  "clearRuntimeCache": "刪除已快取的執行套件並重試嗎？如果載入失敗，需要重新選擇套件。已儲存的作品會保留。"
 }

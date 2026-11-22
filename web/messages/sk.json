@@ -27,5 +27,6 @@
   "error": "Chyba",
   "details": "Podrobnosti",
   "preparing": "Načítava sa…",
-  "starting": "Načítava sa…"
+  "starting": "Načítava sa…",
+  "clearRuntimeCache": "Odstrániť balík z vyrovnávacej pamäte a skúsiť znova? Ak načítanie zlyhá, vyberte balík znova. Uložené kresby zostanú zachované."
 }

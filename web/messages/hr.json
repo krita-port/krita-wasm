@@ -27,5 +27,6 @@
   "error": "Pogreška",
   "details": "Pojedinosti",
   "preparing": "Učitavanje…",
-  "starting": "Učitavanje…"
+  "starting": "Učitavanje…",
+  "clearRuntimeCache": "Ukloniti paket iz predmemorije i pokušati ponovno? Ako učitavanje ne uspije, ponovno odaberite paket. Spremljeni crteži ostaju sačuvani."
 }

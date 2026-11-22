@@ -27,5 +27,6 @@
   "error": "Napaka",
   "details": "Podrobnosti",
   "preparing": "Nalaganje…",
-  "starting": "Nalaganje…"
+  "starting": "Nalaganje…",
+  "clearRuntimeCache": "Odstranim paket iz predpomnilnika in poskusim znova? Če nalaganje ne uspe, znova izberite paket. Shranjene risbe ostanejo."
 }

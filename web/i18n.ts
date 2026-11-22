@@ -18,31 +18,55 @@ export function languageTag(code: unknown): string | null {
 }
 
 export function matchLanguage(requested: string, available: string[]): string | null {
-  const tag = languageTag(requested)
+  const tag = languageTag(requested)?.replace(/^no(?=-|$)/, 'nb')
   if (!tag)
     return null
   const locale = new Intl.Locale(tag)
+  const requestedScript = locale.maximize().script
+  const compatible = (code: string | undefined) => code && new Intl.Locale(languageTag(code)!).maximize().script === requestedScript
+    ? code
+    : null
   const lookup = new Map(available.map(code => [
     languageTag(code)?.toLowerCase(),
     code,
   ]))
-  const exact = lookup.get(tag.toLowerCase())
+  const exact = lookup.get(locale.baseName.toLowerCase())
   if (exact)
     return exact
   if (locale.language === 'zh') {
-    const traditional = locale.script
-      ? locale.script === 'Hant'
-      : ['TW', 'HK', 'MO'].includes(locale.region || '')
-    return available.includes(traditional ? 'zh_TW' : 'zh_CN')
-      ? (traditional ? 'zh_TW' : 'zh_CN')
+    const traditional = requestedScript === 'Hant'
+    const catalog = traditional ? 'zh_TW' : 'zh_CN'
+    return available.includes(catalog)
+      ? compatible(catalog)
       : null
+  }
+  // Try the same locale without a redundant default script before dropping
+  // its region/variants (ca-Latn-ES-valencia -> ca-ES-valencia -> ca-valencia).
+  const candidates = [locale.baseName]
+  if (locale.script && locale.maximize().script === new Intl.Locale(locale.language).maximize().script)
+    candidates.push(locale.baseName.replace(new RegExp(`-${locale.script}(?=-|$)`, 'i'), ''))
+  for (const candidate of candidates) {
+    const matched = lookup.get(candidate.toLowerCase())
+      || (locale.region && lookup.get(candidate.replace(new RegExp(`-${locale.region}(?=-|$)`, 'i'), '').toLowerCase()))
+    if (compatible(matched))
+      return matched || null
+  }
+  // Once no requested variant exists, retain the region before falling back
+  // to the language. Ignore a script only when it matches that catalog's script.
+  if (locale.region) {
+    const scriptedRegion = locale.script && lookup.get(`${locale.language}-${locale.script}-${locale.region}`.toLowerCase())
+    if (scriptedRegion)
+      return scriptedRegion
+    const regional = compatible(lookup.get(`${locale.language}-${locale.region}`.toLowerCase()))
+    if (regional)
+      return regional
   }
   if (locale.script) {
     const scripted = lookup.get(`${locale.language}-${locale.script}`.toLowerCase())
     if (scripted)
       return scripted
   }
-  return lookup.get(locale.language) || null
+  return compatible(lookup.get(locale.language))
 }
 
 export function resolveLanguages(choice: string[] | null, browserLanguages: readonly string[], available: string[]): string[] {
@@ -57,12 +81,15 @@ export function resolveLanguages(choice: string[] | null, browserLanguages: read
       continue
     if (!result.includes(matched))
       result.push(matched)
+    // Explicit native preferences keep their complete user-selected order.
+    if (choice?.length)
+      continue
     if (matched === 'en')
       break
     // Region-specific catalogs fall back to their base language before the
     // next browser preference. Modifiers keep their exact catalog first.
     const base = languageTag(matched)?.split('-')[0]
-    if (base && supported.includes(base) && !result.includes(base))
+    if (base && supported.includes(base) && matchLanguage(matched, [base]) === base && !result.includes(base))
       result.push(base)
     if (base === 'en')
       break

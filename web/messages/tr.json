@@ -27,5 +27,6 @@
   "error": "Hata",
   "details": "Ayrıntılar",
   "preparing": "Yükleniyor…",
-  "starting": "Yükleniyor…"
+  "starting": "Yükleniyor…",
+  "clearRuntimeCache": "Önbellekteki çalışma paketini kaldırıp yeniden denensin mi? Yükleme başarısız olursa bir paketi yeniden seçin. Kaydedilmiş çizimler korunur."
 }

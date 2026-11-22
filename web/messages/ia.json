@@ -27,5 +27,6 @@
   "error": "Error",
   "details": "Detalios",
   "preparing": "Cargamento…",
-  "starting": "Cargamento…"
+  "starting": "Cargamento…",
+  "clearRuntimeCache": "Remover le pacchetto in cache e reprobar? Si le cargamento falle, selige un pacchetto de novo. Le designos salvate es conservate."
 }

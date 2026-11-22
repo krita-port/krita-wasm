@@ -25,7 +25,6 @@ MESSAGES = {
     "loading": "Loading resources...",
     "starting": "Loading Main Window...",
     "error": "Error",
-    "details": "Details",
 }
 
 
@@ -104,7 +103,11 @@ def build_index(share: Path) -> dict[str, Any]:
         entries = dict(custom[language])
         for key, text in MESSAGES.items():
             value = catalog.gettext(text)
-            if value == text and hasattr(catalog, "_catalog"):
+            if (
+                key not in {"light", "dark"}
+                and value == text
+                and hasattr(catalog, "_catalog")
+            ):
                 # Reuse existing context-specific translations for short UI
                 # labels instead of maintaining a second catalog of synonyms.
                 variants = sorted(

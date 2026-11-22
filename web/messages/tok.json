@@ -12,9 +12,9 @@
   "windowCorners": "sike pi poka sitelen",
   "controlCorners": "sike pi ilo lawa",
   "replaceBundle": "o kama jo e poki ante",
-  "changeWarning": "sina open sin e lipu la pali pi awen ala li weka. sina wile ala wile awen?",
+  "changeWarning": "sina open sin e lipu la pali pi awen ala li weka. sina wile ala wile open sin e lipu?",
   "jspiUnavailable": "ilo lukin sina o ken kepeken ilo WebAssembly JSPI. o sin e ilo lukin sina.",
-  "downloadReady": "ijo lipu li pona tawa kama jo. o pilin e nena pi kama jo la ilo sina li awen e ona. poki pi ilo lukin li ante. sina pini e kama jo la sina ken open sin e ona.",
+  "downloadReady": "ijo lipu li pona tawa kama jo. o pilin e nena pi kama jo la ilo sina li awen e ona. poki pi ilo lukin li ante. sina pini e ilo pi anu lipu la sina ken pilin sin e nena pi kama jo.",
   "openSource": "o anu e ma pi lipu sina.",
   "bundlePrompt": "o kama jo e {filename} tan GitHub Releases. o anu e ona anu o tawa e ona tawa ni. lipu li awen lon ilo sina.",
   "bundleCache": "poki ni li awen lon ilo lukin ni. sina weka e awen pi ilo lukin la o anu sin e lipu.",
@@ -27,5 +27,6 @@
   "error": "pakala",
   "details": "sona ante",
   "preparing": "kama jo…",
-  "starting": "kama jo…"
+  "starting": "kama jo…",
+  "clearRuntimeCache": "o weka e poki ilo tan poki awen lili li pali sin anu seme? pana li pakala la o anu sin e lipu lon ilo sina. sitelen awen sina li awen."
 }

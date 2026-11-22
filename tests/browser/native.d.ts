@@ -86,6 +86,7 @@ declare global {
   var kritaSettingsPreviousFocus: Element | null
   var kritaTestHelpUrls: string[]
   var kritaOriginalOpen: typeof window.open
+  var kritaWorkbenchDocument: string
   var kritaLanguageDocument: string
   var kritaStyleDocumentId: string
   var kritaAppearanceDocument: string

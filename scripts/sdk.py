@@ -2,6 +2,7 @@
 """Resolve and verify Nightly dependency releases; never build third-party code."""
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -33,21 +34,25 @@ def sha256(path: Path) -> str:
 
 
 def release() -> dict[str, Any]:
+    frozen = os.environ.get("KRITA_SDK_RELEASE")
+    if frozen:
+        record: dict[str, Any] = json.loads(frozen)
+        return record
     path = ROOT / "build/sdk-release.json"
     if not path.is_file():
         raise ValueError("No selected SDK release; run python scripts/sdk.py fetch")
-    record: dict[str, Any] = json.loads(path.read_text())
+    record = json.loads(path.read_text())
     return record
 
 
-def selected(name: str) -> dict[str, Any]:
+def selected(name: str, record: dict[str, Any] | None = None) -> dict[str, Any]:
     if name not in PACKAGES:
         raise ValueError("Unknown dependency SDK")
-    return dict(release()["packages"][name])
+    return dict((record if record is not None else release())["packages"][name])
 
 
-def prefix(name: str) -> Path:
-    entry = selected(name)
+def prefix(name: str, record: dict[str, Any] | None = None) -> Path:
+    entry = selected(name, record)
     folder = ROOT / "cache/sdk" / f"{name}-{entry['binary']['sha256'][:16]}"
     if folder.exists() and sha256(folder / "sdk.json") != entry["inventory_sha256"]:
         raise ValueError("Cached SDK inventory does not match the selected release")
@@ -216,7 +221,16 @@ def import_sdk(name: str, archive: Path) -> Path:
             with tarfile.open(archive) as stream:
                 stream.extractall(tree, filter="data")
             verify_tree(tree)
-            tree.rename(destination)
+            try:
+                tree.rename(destination)
+            except OSError:
+                if not destination.is_dir():
+                    raise
+                if sha256(tree / "sdk.json") != sha256(destination / "sdk.json"):
+                    raise ValueError(
+                        "Concurrent SDK inventory differs from release archive"
+                    ) from None
+                verify_tree(destination)
     manifest = json.loads((destination / "sdk.json").read_text())
     if manifest["stage"] != PACKAGES[name][0]:
         raise ValueError(f"SDK manifest has the wrong stage: {name}")
@@ -236,31 +250,36 @@ def fetch() -> None:
         entry["inventory_sha256"] = sha256(folder / "sdk.json")
         folders[name] = folder
     verify_pair(folders["sdk"], folders["i18n"])
-    current = resolve_release()
-    if any(
-        record["packages"][name]["binary"] != current["packages"][name]["binary"]
-        for name in PACKAGES
-    ):
-        raise ValueError(
-            "Nightly assets changed while downloading; previous selection preserved. Run fetch again."
-        )
     path = ROOT / "build/sdk-release.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix=".sdk-release-", dir=path.parent
-    ) as temporary:
-        staged = Path(temporary) / path.name
-        staged.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
-        staged.replace(path)
+    # Serialize the final release check and publication, not the downloads.
+    # A delayed older fetch must not replace a newer fetch's selection.
+    with path.with_suffix(".lock").open("a+") as selection_lock:
+        fcntl.flock(selection_lock, fcntl.LOCK_EX)
+        current = resolve_release()
+        if any(
+            record["packages"][name]["binary"] != current["packages"][name]["binary"]
+            for name in PACKAGES
+        ):
+            raise ValueError(
+                "Nightly assets changed while downloading; previous selection preserved. Run fetch again."
+            )
+        with tempfile.TemporaryDirectory(
+            prefix=".sdk-release-", dir=path.parent
+        ) as temporary:
+            staged = Path(temporary) / path.name
+            staged.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+            staged.replace(path)
 
 
 def verify() -> None:
+    record = release()
     for name in PACKAGES:
-        entry = selected(name)
+        entry = selected(name, record)
         archive = archive_path(entry["binary"])
         if not archive.is_file() or sha256(archive) != entry["binary"]["sha256"]:
             raise ValueError(f"Dependency archive checksum mismatch: {name}")
-    verify_pair(prefix("sdk"), prefix("i18n"))
+    verify_pair(prefix("sdk", record), prefix("i18n", record))
 
 
 def main() -> None:
@@ -277,6 +296,10 @@ def main() -> None:
         return
     if args.command == "fetch":
         fetch()
+        os.environ.pop("KRITA_SDK_RELEASE", None)
+    # One invocation and all its build children share an immutable selection.
+    os.environ["KRITA_SDK_RELEASE"] = json.dumps(release())
+    print(f"export KRITA_SDK_RELEASE={shlex.quote(os.environ['KRITA_SDK_RELEASE'])}")
     for name, variable in [("sdk", "KRITA_SDK_DIR"), ("i18n", "KRITA_I18N_DIR")]:
         folder = prefix(name)
         if not folder.is_dir():

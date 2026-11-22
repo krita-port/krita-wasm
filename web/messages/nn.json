@@ -27,5 +27,6 @@
   "error": "Feil",
   "details": "Detaljar",
   "preparing": "Lastar inn…",
-  "starting": "Lastar inn…"
+  "starting": "Lastar inn…",
+  "clearRuntimeCache": "Fjerna pakken frå mellomlageret og prøva igjen? Om innlastinga mislukkast, vel ein pakke på nytt. Lagra teikningar vert tekne vare på."
 }

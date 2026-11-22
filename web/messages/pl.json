@@ -27,5 +27,6 @@
   "error": "Błąd",
   "details": "Szczegóły",
   "preparing": "Wczytywanie…",
-  "starting": "Wczytywanie…"
+  "starting": "Wczytywanie…",
+  "clearRuntimeCache": "Usunąć pakiet z pamięci podręcznej i spróbować ponownie? Jeśli wczytywanie się nie powiedzie, wybierz pakiet ponownie. Zapisane rysunki zostaną zachowane."
 }

@@ -31,7 +31,12 @@ async function startServer(t: TestContext, root: string, mode: string) {
     '0',
     ...flags,
   ], {
-    env: { ...environment, KRITA_WEB_DIR: root },
+    env: {
+      ...environment,
+      KRITA_WEB_DIR: mode === 'dev'
+        ? root
+        : undefined,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   const closed = once(child, 'close')
@@ -68,7 +73,7 @@ async function startServer(t: TestContext, root: string, mode: string) {
 
 for (const mode of ['dev', 'auto', 'manual']) {
   test(`actual Vite CLI preserves ${mode} hosting and fixed ports`, async (t) => {
-    const root = await mkdtemp(join(tmpdir(), 'krita-preview-'))
+    const root = await mkdtemp(join(tmpdir(), 'krita-preview #?-'))
     t.after(() => rm(root, { recursive: true, force: true }))
     await mkdir(join(root, 'pages'))
     await mkdir(join(root, 'unlisted'))
@@ -77,7 +82,7 @@ for (const mode of ['dev', 'auto', 'manual']) {
     await writeFile(join(root, 'i18n.json'), JSON.stringify({
       languages: ['en'],
     }))
-    await writeFile(join(root, 'pages/bundle.json'), JSON.stringify({ mode: 'manual' }))
+    await writeFile(join(root, 'pages/bundle.json'), JSON.stringify({ mode: 'manual', release_url: 'https://example.invalid/releases' }))
     const archive = gzipSync(Buffer.from('local release archive'))
     await writeFile(join(root, 'krita.bundle.tar.gz'), archive)
     const base = await startServer(t, root, mode)
@@ -89,6 +94,20 @@ for (const mode of ['dev', 'auto', 'manual']) {
     assert.match(index.headers.get('content-type')!, /text\/html/)
     assert.equal(index.headers.get('cache-control'), 'no-store')
     if (mode === 'dev') {
+      await mkdir(resolve('build'), { recursive: true })
+      const privateRoot = await mkdtemp(join(resolve('build'), 'vite-private-'))
+      t.after(() => rm(privateRoot, { recursive: true, force: true }))
+      for (const folder of [
+        privateRoot,
+        join(root, 'unlisted'),
+      ]) {
+        const path = join(folder, 'private.txt')
+        await writeFile(path, 'private development fixture')
+        const encoded = path.split('/').map(encodeURIComponent).join('/')
+        const privateFile = await request(`/@fs${encoded}`)
+        assert.ok([403, 404].includes(privateFile.status), `private path must not be served: ${path}`)
+        assert.ok(!(await privateFile.text()).includes('private development fixture'))
+      }
       const html = await index.text()
       assert.match(html, /\/@vite\/client/)
       const entry = [
@@ -126,6 +145,9 @@ for (const mode of ['dev', 'auto', 'manual']) {
       mode: mode === 'dev'
         ? 'auto'
         : mode,
+      ...(mode === 'manual'
+        ? { release_url: './krita.bundle.tar.gz' }
+        : {}),
     })
     const download = await request('/krita.bundle.tar.gz')
     assert.equal(download.status, 200)
@@ -154,7 +176,12 @@ for (const mode of ['dev', 'auto', 'manual']) {
       base.port,
       ...flags,
     ], {
-      env: { ...environment, KRITA_WEB_DIR: root },
+      env: {
+        ...environment,
+        KRITA_WEB_DIR: mode === 'dev'
+          ? root
+          : undefined,
+      },
       timeout: 10_000,
     })
     assert.ifError(occupied.error)

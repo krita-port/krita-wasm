@@ -27,5 +27,6 @@
   "error": "Eroare",
   "details": "Detalii",
   "preparing": "Se încarcă…",
-  "starting": "Se încarcă…"
+  "starting": "Se încarcă…",
+  "clearRuntimeCache": "Eliminați pachetul din cache și reîncercați? Dacă încărcarea eșuează, selectați un pachet din nou. Desenele salvate sunt păstrate."
 }

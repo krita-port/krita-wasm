@@ -27,5 +27,6 @@
   "error": "Villa",
   "details": "Nánar",
   "preparing": "Hleð inn…",
-  "starting": "Hleð inn…"
+  "starting": "Hleð inn…",
+  "clearRuntimeCache": "Fjarlægja pakkann úr skyndiminni og reyna aftur? Ef hleðsla mistekst skaltu velja pakka aftur. Vistaðar teikningar haldast."
 }

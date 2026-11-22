@@ -27,5 +27,6 @@
   "error": "Fout",
   "details": "Details",
   "preparing": "Laden…",
-  "starting": "Laden…"
+  "starting": "Laden…",
+  "clearRuntimeCache": "Het pakket uit de cache verwijderen en opnieuw proberen? Als het laden mislukt, selecteer dan opnieuw een pakket. Opgeslagen tekeningen blijven behouden."
 }

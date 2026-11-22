@@ -27,5 +27,6 @@
   "error": "错误",
   "details": "详细信息",
   "preparing": "正在加载…",
-  "starting": "正在加载…"
+  "starting": "正在加载…",
+  "clearRuntimeCache": "删除已缓存的运行包并重试吗？如果加载失败，需要重新选择运行包。已保存的作品会保留。"
 }

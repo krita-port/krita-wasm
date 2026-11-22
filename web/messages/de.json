@@ -27,5 +27,6 @@
   "error": "Fehler",
   "details": "Details",
   "preparing": "Wird geladen…",
-  "starting": "Wird geladen…"
+  "starting": "Wird geladen…",
+  "clearRuntimeCache": "Das zwischengespeicherte Laufzeitpaket entfernen und erneut versuchen? Falls das Laden fehlschlägt, wählen Sie erneut ein Paket aus. Gespeicherte Zeichnungen bleiben erhalten."
 }

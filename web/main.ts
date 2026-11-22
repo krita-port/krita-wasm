@@ -1,3 +1,4 @@
+import type { Bundle } from './bundle.js'
 import type { LanguageIndex } from './runtime.js'
 import { prepareRecovery } from './autosave.js'
 import { loadBundleResources, loadRuntimeScript, prepareBundle } from './bundle.js'
@@ -31,6 +32,13 @@ catch { /* Private browsing can disable storage. */ }
 const appearance = installAppearance(document.querySelector<HTMLSelectElement>('#appearance')!, storage)
 const corners = installCornerSettings(document.querySelector<HTMLInputElement>('#window-radius')!, document.querySelector<HTMLInputElement>('#control-radius')!, storage)
 let failureReported = false
+let bundle: Bundle | undefined
+let runtimeReady = false
+let finishStartup: (visible: boolean) => void
+const nativeWindowReady = new Promise<boolean>((resolve) => {
+  finishStartup = resolve
+  window.addEventListener('krita-ready', () => resolve(true), { once: true })
+})
 function reportFailure(error: unknown) {
   const stack = error && typeof error === 'object' && 'stack' in error
     ? error.stack
@@ -46,6 +54,11 @@ function reportFailure(error: unknown) {
     document.querySelector<HTMLElement>('#failure')!.hidden = false
     // Keep the original Wasm stack when onExit later reports a generic abort.
     failureReported = true
+    finishStartup(false)
+    if (!runtimeReady) {
+      globalThis.kritaRecovery?.cancelStartup()
+      void bundle?.cancel().catch(cleanupError => console.warn('Failed runtime cleanup', cleanupError))
+    }
   }
   if (testing) {
     fetch(`/__probe_result?status=${encodeURIComponent(`FAIL: ${details}`)}`)
@@ -59,6 +72,7 @@ function logMessage(message: unknown) {
       .catch(error => console.warn('Diagnostic transport failed', error))
   }
 }
+window.addEventListener('krita-startup-failed', event => reportFailure(new Error(String((event as CustomEvent<string>).detail))))
 window.addEventListener('error', event => reportFailure(event.error || event.message))
 window.addEventListener('unhandledrejection', event => reportFailure(event.reason))
 if (testing) {
@@ -112,13 +126,18 @@ try {
   await ensureIsolation()
   if (typeof WebAssembly.Suspending !== 'function' || typeof WebAssembly.promising !== 'function')
     throw new TypeError(t('jspiUnavailable'))
-  const bundle = await prepareBundle(status, t)
-  const response = await fetch(new URL('i18n.json', bundle.base))
+  const selectedBundle = await prepareBundle(status, t)
+  bundle = selectedBundle
+  const response = await fetch(new URL('i18n.json', selectedBundle.base))
   if (!response.ok)
     throw new Error(`Language index: HTTP ${response.status}`)
   // The page owns its UI messages; the selected runtime owns its locale list.
   index.languages = (await response.json()).languages
   languages = resolveLanguages(choice, navigator.languages, index.languages)
+  document.documentElement.lang = languageTag(languages[0])!
+  document.documentElement.dir = ['ar', 'fa', 'he', 'ur', 'ug'].includes(languages[0].split('_')[0])
+    ? 'rtl'
+    : 'ltr'
   document.querySelector<HTMLElement>('#failure summary')!.textContent = t('details')
   document.querySelector<HTMLElement>('#language-label')!.textContent = t('language')
   document.querySelector<HTMLElement>('#widget-style-label')!.textContent = t('widgetStyle')
@@ -184,13 +203,13 @@ try {
   settings.hidden = false
   installSettings(settings, document.querySelector<HTMLDialogElement>('#page-settings')!, closeSettings, storage)
   status.textContent = t('loading')
-  const runtimeResponse = await fetch(new URL('runtime.json', bundle.base))
+  const runtimeResponse = await fetch(new URL('runtime.json', selectedBundle.base))
   if (!runtimeResponse.ok)
     throw new Error(`Runtime configuration: HTTP ${runtimeResponse.status}`)
   const runtime = await runtimeResponse.json()
   if (runtime.jspi && (typeof WebAssembly.Suspending !== 'function' || typeof WebAssembly.promising !== 'function'))
     throw new Error(t('jspiUnavailable'))
-  const resources = await loadBundleResources(bundle)
+  const resources = await loadBundleResources(selectedBundle)
   const recovery = await prepareRecovery({
     startupFailed: reportFailure,
     failed: (message) => {
@@ -200,15 +219,26 @@ try {
     },
   })
   globalThis.kritaRecovery = recovery
-  await loadRuntimeScript(new URL('krita.js', bundle.base))
-  await loadRuntimeScript(new URL('qtloader.js', bundle.base))
+  await loadRuntimeScript(new URL('krita.js', selectedBundle.base))
+  await loadRuntimeScript(new URL('qtloader.js', selectedBundle.base))
+  if (failureReported)
+    throw new Error('Runtime script startup failed.')
   installSaveShortcutGuard(document.querySelector<HTMLElement>('#screen')!)
   const application = await qtLoad({
     print: logMessage,
     printErr: logMessage,
-    locateFile: name => new URL(name, bundle.base).href,
+    locateFile: name => new URL(name, selectedBundle.base).href,
     preRun: [
       (instance) => {
+        for (const name of [
+          '_kritaWasmRelocateRecoveries',
+          '_kritaWasmSetWidgetStyle',
+          '_kritaWasmSetColorScheme',
+          '_kritaWasmSetControlRadius',
+        ] as const) {
+          if (typeof instance[name] !== 'function')
+            throw new TypeError(`Missing native runtime export: ${name}`)
+        }
         for (const dir of [
           '/krita/config',
           '/krita/home',
@@ -235,8 +265,8 @@ try {
         installFileDialog(instance, t)
         if (testing) {
           globalThis.kritaTestFS = instance.FS
-          globalThis.kritaTestSnapshot = (includePixels = false) => {
-            instance._kritaWasmTestSnapshot(includePixels ? 1 : 0)
+          globalThis.kritaTestSnapshot = (includePixels = false, swapHistory = false) => {
+            instance._kritaWasmTestSnapshot((includePixels ? 1 : 0) | (swapHistory ? 2 : 0))
             return globalThis.kritaWidgetSnapshot
           }
         }
@@ -280,10 +310,18 @@ try {
   appearance.connectNative(value => application._kritaWasmSetColorScheme(value))
   corners.connectNative(value => application._kritaWasmSetControlRadius(value))
   if (testing) {
-    globalThis.kritaTestSnapshot = (includePixels = false) => {
-      application._kritaWasmTestSnapshot(includePixels ? 1 : 0)
+    // Recovery dialogs precede the main window, so their widgets must already
+    // be available to the shared browser driver while startup is still pending.
+    globalThis.kritaTestSnapshot = (includePixels = false, swapHistory = false) => {
+      application._kritaWasmTestSnapshot((includePixels ? 1 : 0) | (swapHistory ? 2 : 0))
       return globalThis.kritaWidgetSnapshot
     }
+  }
+  if (await nativeWindowReady && !failureReported) {
+    await selectedBundle.ready()
+    runtimeReady = true
+    if (!failureReported)
+      status.hidden = true
   }
 }
 catch (error) {

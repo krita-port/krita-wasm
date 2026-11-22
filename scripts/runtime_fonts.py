@@ -79,7 +79,12 @@ def import_fonts(lock: dict[str, Any], work: Path, archive: Path | None = None) 
                 path.write_bytes(data)
         (tree / "fonts.json").write_text(json.dumps(lock, indent=2) + "\n")
         verify_tree(tree, lock)
-        tree.rename(destination)
+        try:
+            tree.rename(destination)
+        except OSError:
+            if not destination.is_dir():
+                raise
+            verify_tree(destination, lock)
     return destination
 
 

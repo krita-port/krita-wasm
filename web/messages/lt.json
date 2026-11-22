@@ -27,5 +27,6 @@
   "error": "Klaida",
   "details": "Išsamiau",
   "preparing": "Įkeliama…",
-  "starting": "Įkeliama…"
+  "starting": "Įkeliama…",
+  "clearRuntimeCache": "Pašalinti paketą iš podėlio ir bandyti dar kartą? Jei įkelti nepavyks, pasirinkite paketą iš naujo. Įrašyti piešiniai bus išsaugoti."
 }

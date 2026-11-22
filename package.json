@@ -19,6 +19,7 @@
     "@types/emscripten": "1.41.6",
     "@types/node": "26.5.1",
     "eslint": "10.15.0",
+    "sirv": "3.0.2",
     "typescript": "6.0.3",
     "vite": "8.3.8"
   }

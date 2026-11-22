@@ -27,5 +27,6 @@
   "error": "Gwall",
   "details": "Manylion",
   "preparing": "Yn llwytho…",
-  "starting": "Yn llwytho…"
+  "starting": "Yn llwytho…",
+  "clearRuntimeCache": "Tynnu’r pecyn o’r storfa a cheisio eto? Os bydd y llwytho’n methu, dewiswch becyn eto. Cedwir lluniadau sydd wedi’u cadw."
 }

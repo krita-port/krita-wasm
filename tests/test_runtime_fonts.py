@@ -3,12 +3,16 @@
 import hashlib
 import importlib.util
 import io
+import shutil
+import sys
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 SPEC = importlib.util.spec_from_file_location(
     "runtime_fonts", Path(__file__).resolve().parents[1] / "scripts/runtime_fonts.py"
@@ -70,6 +74,34 @@ class RuntimeFontsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "member checksum mismatch"):
             self.import_fonts()
         self.assertFalse(fonts.cache_path(self.lock, self.root / "work").exists())
+
+    def test_concurrent_verified_installation_reuses_winner(self) -> None:
+        rename = Path.rename
+
+        def concurrent(source: Path, destination: Path) -> Path:
+            shutil.copytree(source, destination)
+            return rename(source, destination)
+
+        with patch.object(Path, "rename", concurrent):
+            folder = self.import_fonts()
+        self.assertEqual((folder / "fonts/font.ttc").read_bytes(), b"prebuilt font")
+        fonts.verify_tree(folder, self.lock)
+
+    def test_concurrent_corrupt_winner_is_preserved_and_rejected(self) -> None:
+        rename = Path.rename
+
+        def concurrent(source: Path, destination: Path) -> Path:
+            shutil.copytree(source, destination)
+            (destination / "fonts/font.ttc").write_bytes(b"corrupt winner")
+            return rename(source, destination)
+
+        with (
+            patch.object(Path, "rename", concurrent),
+            self.assertRaisesRegex(ValueError, "checksum mismatch"),
+        ):
+            self.import_fonts()
+        folder = fonts.cache_path(self.lock, self.root / "work")
+        self.assertEqual((folder / "fonts/font.ttc").read_bytes(), b"corrupt winner")
 
     def test_preserves_modified_cached_font(self) -> None:
         folder = self.import_fonts()

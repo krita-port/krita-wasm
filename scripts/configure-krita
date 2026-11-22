@@ -2,6 +2,17 @@
 # Configure Krita against verified prebuilt dependencies.
 set -euo pipefail
 project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+mkdir -p "$project_root/build/cmake"
+if [[ -n "${KRITA_BUILD_LOCK_FD:-}" ]]; then
+    exec 9>&"$KRITA_BUILD_LOCK_FD"
+else
+    exec 9>"$project_root/build/cmake/krita.lock"
+fi
+if ! flock -n 9; then
+    echo "Another Krita build is using this checkout; wait for it to exit." >&2
+    exit 1
+fi
+export KRITA_BUILD_LOCK_FD=9
 sdk_environment=$(python3 "$project_root/scripts/sdk.py" environment)
 eval "$sdk_environment"
 sdk_prefix=$KRITA_SDK_DIR
@@ -26,7 +37,8 @@ done
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
     "-DKRITA_WASM_GLUE_DIR=$project_root/src" \
     "-DCMAKE_C_FLAGS=$c_flags" "-DCMAKE_CXX_FLAGS=$cxx_flags" \
-    "-DCMAKE_EXE_LINKER_FLAGS=$link_flags" \
+    "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG" "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG" \
+    "-DCMAKE_EXE_LINKER_FLAGS=$link_flags" -DCMAKE_EXE_LINKER_FLAGS_RELEASE= \
     "-DQT_HOST_PATH=$sdk_prefix/host" "-DQT_HOST_PATH_CMAKE_DIR=$sdk_prefix/host/lib/cmake" \
     "-DKF6_HOST_TOOLING=$sdk_prefix/host/lib/cmake" \
     "-DECM_DIR=$sdk_prefix/common/share/ECM/cmake" \

@@ -90,9 +90,11 @@ export function installAppearance(select: HTMLSelectElement, storage: Storage | 
       : 'none')
   }
   const send = () => {
+    // Startup palette acknowledgements also track the latest choice, including
+    // changes made while the native bridge is not ready to send it yet.
+    pending = scheme()
     if (!request || !nativeReady)
       return
-    pending = scheme()
     if (!request(pending === 'dark'
       ? 1
       : 0)) {
@@ -205,6 +207,7 @@ export function installWidgetStyleSettings(select: HTMLSelectElement, request: N
 
 export function installSettings(button: HTMLButtonElement, dialog: HTMLDialogElement, close: HTMLButtonElement, storage: Storage | undefined) {
   const positionKey = 'krita.settings-position'
+  let position: { x: number, y: number } | undefined
   let drag: { pointer: number, x: number, y: number, left: number, top: number } | null
   let moved = false
   let previousFocus: Element | null
@@ -218,8 +221,10 @@ export function installSettings(button: HTMLButtonElement, dialog: HTMLDialogEle
   }
   try {
     const saved = JSON.parse(storage?.getItem(positionKey) || 'null')
-    if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y))
-      place(saved.x, saved.y)
+    if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y)) {
+      position = { x: saved.x, y: saved.y }
+      place(position.x, position.y)
+    }
   }
   catch { /* Settings remain usable when browser storage is unavailable. */ }
   button.addEventListener('pointerdown', (event) => {
@@ -249,6 +254,8 @@ export function installSettings(button: HTMLButtonElement, dialog: HTMLDialogEle
     moved = true
     button.classList.add('dragging')
     place(drag.left + dx, drag.top + dy)
+    const rect = button.getBoundingClientRect()
+    position = { x: rect.left, y: rect.top }
   })
   button.addEventListener('pointerup', (event) => {
     if (!drag || drag.pointer !== event.pointerId)
@@ -296,7 +303,7 @@ export function installSettings(button: HTMLButtonElement, dialog: HTMLDialogEle
   })
   dialog.addEventListener('keyup', event => event.stopPropagation())
   window.addEventListener('resize', () => {
-    const rect = button.getBoundingClientRect()
-    place(rect.left, rect.top)
+    if (position)
+      place(position.x, position.y)
   })
 }

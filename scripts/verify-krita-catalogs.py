@@ -26,10 +26,11 @@ def main() -> None:
     args = parser.parse_args()
     if args.report.exists():
         raise ValueError("Preserving existing catalog comparison report")
+    release = sdk.release()
     os.environ.update(
         {
-            "KRITA_SDK_DIR": str(sdk.prefix("sdk")),
-            "KRITA_I18N_DIR": str(sdk.prefix("i18n")),
+            "KRITA_SDK_DIR": str(sdk.prefix("sdk", release)),
+            "KRITA_I18N_DIR": str(sdk.prefix("i18n", release)),
         }
     )
     sdk.verify_i18n()

@@ -27,5 +27,6 @@
   "error": "Errorea",
   "details": "Xehetasunak",
   "preparing": "Kargatzen…",
-  "starting": "Kargatzen…"
+  "starting": "Kargatzen…",
+  "clearRuntimeCache": "Cacheko paketea kendu eta berriro saiatu? Kargak huts egiten badu, hautatu pakete bat berriro. Gordetako marrazkiak mantenduko dira."
 }

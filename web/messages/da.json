@@ -27,5 +27,6 @@
   "error": "Fejl",
   "details": "Detaljer",
   "preparing": "Indlæser…",
-  "starting": "Indlæser…"
+  "starting": "Indlæser…",
+  "clearRuntimeCache": "Fjern den cachede pakke og prøv igen? Hvis indlæsningen mislykkes, skal du vælge en pakke igen. Gemte tegninger bevares."
 }

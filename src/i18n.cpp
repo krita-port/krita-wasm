@@ -55,6 +55,7 @@
 #include <kundo2stack.h>
 #include <thememanager.h>
 #include <tiles3/kis_tile_data_store.h>
+#include <tiles3/kis_tile_data_store_iterators.h>
 
 namespace {
 void applyControlRadius(int radius) {
@@ -409,6 +410,22 @@ extern "C" EMSCRIPTEN_KEEPALIVE void kritaWasmTestSnapshot(int includePixels) {
             item["acceptMode"] = int(dialog->acceptMode());
         }
         if (auto *view = qobject_cast<QAbstractItemView *>(widget);
+            view && view->objectName() == QLatin1String("recentDocumentsListView")) {
+            for (int row = 0; row < view->model()->rowCount(view->rootIndex()); ++row) {
+                const auto index = view->model()->index(row, 0, view->rootIndex());
+                const auto rect = view->visualRect(index);
+                if (!rect.isValid() || !view->viewport()->rect().intersects(rect))
+                    continue;
+                const auto origin = view->viewport()->mapToGlobal(rect.topLeft());
+                widgets.append(QJsonObject{{"class", "KritaTestRecentItem"},
+                                           {"filePath", index.data(Qt::ToolTipRole).toString()},
+                                           {"x", origin.x()},
+                                           {"y", origin.y()},
+                                           {"width", rect.width()},
+                                           {"height", rect.height()}});
+            }
+        }
+        if (auto *view = qobject_cast<QAbstractItemView *>(widget);
             view &&
             (view->objectName() == QLatin1String("treeView") ||
              view->objectName() == QLatin1String("listView") ||
@@ -516,11 +533,13 @@ extern "C" EMSCRIPTEN_KEEPALIVE void kritaWasmTestSnapshot(int includePixels) {
                          {"undoCount", document->undoStack()->count()},
                          {"canUndo", document->undoStack()->canUndo()},
                          {"canRedo", document->undoStack()->canRedo()}};
-        if (includePixels) {
+        if (includePixels & 1) {
             QJsonArray layers;
             for (auto node = document->image()->rootLayer()->firstChild(); node;
                  node = node->nextSibling()) {
                 auto device = node->paintDevice();
+                if (!device)
+                    device = node->original();
                 if (device)
                     layers.append(
                         QJsonObject{{"name", node->name()},
@@ -532,9 +551,21 @@ extern "C" EMSCRIPTEN_KEEPALIVE void kritaWasmTestSnapshot(int includePixels) {
         widgets.append(item);
     }
     auto *tileStore = KisTileDataStore::instance();
+    int residentHistoryTiles = -1;
+    if (includePixels & 2) {
+        residentHistoryTiles = 0;
+        auto *iterator = tileStore->beginIteration();
+        while (iterator->hasNext()) {
+            auto *tile = iterator->next();
+            if (tile->historical() && !iterator->trySwapOut(tile))
+                ++residentHistoryTiles;
+        }
+        tileStore->endIteration(iterator);
+    }
     const auto memory = tileStore->memoryStatistics();
     widgets.append(QJsonObject{{"class", "KritaTestTileMemory"},
                                {"swapBytes", double(memory.swapSize)},
+                               {"residentHistoryTiles", residentHistoryTiles},
                                {"residentBytes", double(memory.totalMemorySize)},
                                {"tilesInMemory", tileStore->numTilesInMemory()},
                                {"tilesTotal", tileStore->numTiles()}});

@@ -1,7 +1,16 @@
+Subject: [PATCH] Separate browser saved files and disposable recovery
+
+Keep saved files independent of recovery. Acknowledge named Open Main File
+and common document-close Discard before continuing. Pause and finish autosave
+while deleting, retain the snapshot and cancel closing when persistence fails.
+Desktop cleanup retains its existing behavior and reports success.
+Upstream issue searches for browser discard persistence found no matching issue.
+
 diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
+index 88735fe..7556842 100644
 --- a/libs/ui/KisDocument.cpp
 +++ b/libs/ui/KisDocument.cpp
-@@ -1090,11 +1090,10 @@
+@@ -1090,11 +1090,10 @@ void KisDocument::slotCompleteSavingDocument(const KritaUtils::ExportFileJob &jo
              d->updateDocumentMetadataOnSaving(job.filePath, job.mimeType);
  
  #ifdef Q_OS_WASM
@@ -17,7 +26,7 @@ diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
                  // Preserve native layers even when Save writes a flattened format.
                  setProperty("kritaWasmRecoveryAfterSave", true);
                  QTimer::singleShot(0, this, SLOT(slotAutoSave()));
-@@ -1925,8 +1924,8 @@
+@@ -1925,8 +1924,8 @@ QString KisDocument::generateAutoSaveFileName(const QString & path) const
  {
  #ifdef Q_OS_WASM
      // Browser sessions have no distinct desktop PID or persistent source path.
@@ -28,7 +37,25 @@ diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
  #endif
      QString retval;
  
-@@ -2034,7 +2033,8 @@
+@@ -2021,9 +2020,16 @@ bool KisDocument::openPath(const QString &_path, OpenFlags flags)
+                 path = asf;
+                 autosaveOpened = true;
+                 break;
+-            case KisRecoverNamedAutosaveDialog::OpenMainFile :
++            case KisRecoverNamedAutosaveDialog::OpenMainFile:
+                 KisUsageLogger::log(QString("Removing autosave file: %1").arg(asf));
++#ifdef Q_OS_WASM
++                extern bool kritaWasmDiscardRecovery(const QString &);
++                if (!kritaWasmDiscardRecovery(asf)) {
++                    return false;
++                }
++#else
+                 QFile::remove(asf);
++#endif
+                 break;
+             default: // Cancel
+                 return false;
+@@ -2034,7 +2040,8 @@ bool KisDocument::openPath(const QString &_path, OpenFlags flags)
      bool ret = openPathInternal(path);
  #ifdef Q_OS_WASM
      if (ret && (flags & RecoveryFile)) {
@@ -38,21 +65,76 @@ diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
      }
  #endif
  
-@@ -2324,6 +2324,14 @@
+@@ -2321,11 +2328,21 @@ QString KisDocument::warningMessage() const
+     return d->lastWarningMessage;
+ }
  
- void KisDocument::removeAutoSaveFiles(const QString &autosaveBaseName, bool wasRecovered)
+-
+-void KisDocument::removeAutoSaveFiles(const QString &autosaveBaseName, bool wasRecovered)
++bool KisDocument::removeAutoSaveFiles(const QString &autosaveBaseName, bool wasRecovered)
  {
 +#ifdef Q_OS_WASM
 +    // Discard must never remove the user's separately saved browser file,
 +    // even if its chosen name happens to end with "-autosave.kra".
-+    QFile::remove(generateAutoSaveFileName(localFilePath()));
-+    extern void kritaWasmSyncRecovery();
-+    kritaWasmSyncRecovery();
-+    return;
-+#endif
++    const bool autosaveWasActive = isAutoSaveActive();
++    setAutoSaveActive(false);
++    waitForSavingToComplete();
++    extern bool kritaWasmDiscardRecovery(const QString &);
++    const bool discarded = kritaWasmDiscardRecovery(generateAutoSaveFileName(localFilePath()));
++    setAutoSaveActive(autosaveWasActive);
++    return discarded;
++#else
      // Eliminate any auto-save file
-     QString asf = generateAutoSaveFileName(autosaveBaseName);   // the one in the current dir
+-    QString asf = generateAutoSaveFileName(autosaveBaseName);   // the one in the current dir
++    QString asf = generateAutoSaveFileName(autosaveBaseName); // the one in the current dir
      if (QFile::exists(asf)) {
+         KisUsageLogger::log(QString("Removing autosave file: %1").arg(asf));
+         QFile::remove(asf);
+@@ -2352,9 +2369,7 @@ void KisDocument::removeAutoSaveFiles(const QString &autosaveBaseName, bool wasR
+             QFile::remove(autosaveBaseName);
+         }
+     }
+-#ifdef Q_OS_WASM
+-    extern void kritaWasmSyncRecovery();
+-    kritaWasmSyncRecovery();
++    return true;
+ #endif
+ }
+ 
+diff --git a/libs/ui/KisDocument.h b/libs/ui/KisDocument.h
+index 0c402f5..ddccea7 100644
+--- a/libs/ui/KisDocument.h
++++ b/libs/ui/KisDocument.h
+@@ -304,9 +304,10 @@ public:
+     KoDocumentInfo *documentInfo() const;
+ 
+     /**
+-     * Performs a cleanup of unneeded backup files
++     * Performs a cleanup of unneeded backup files.
++     * Returns false if browser recovery deletion could not be persisted.
+      */
+-    void removeAutoSaveFiles(const QString &autosaveBaseName, bool wasRecovered);
++    bool removeAutoSaveFiles(const QString &autosaveBaseName, bool wasRecovered);
+ 
+     /**
+      * Returns true if this document or any of its internal child documents are modified.
+diff --git a/libs/ui/KisView.cpp b/libs/ui/KisView.cpp
+index 08f964f..a99691c 100644
+--- a/libs/ui/KisView.cpp
++++ b/libs/ui/KisView.cpp
+@@ -1183,8 +1183,10 @@ bool KisView::queryClose()
+             image->requestStrokeCancellation();
+             viewManager()->blockUntilOperationsFinishedForced(image);
+ 
+-            document()->removeAutoSaveFiles(document()->localFilePath(), document()->isRecovered());
+-            document()->setModified(false);   // Now when queryClose() is called by closeEvent it won't do anything.
++            if (!document()->removeAutoSaveFiles(document()->localFilePath(), document()->isRecovered())) {
++                return false;
++            }
++            document()->setModified(false); // Now when queryClose() is called by closeEvent it won't do anything.
+             break;
+         }
+         default : // case QMessageBox::Cancel :
 diff --git a/libs/ui/KisMainWindow.cpp b/libs/ui/KisMainWindow.cpp
 --- a/libs/ui/KisMainWindow.cpp
 +++ b/libs/ui/KisMainWindow.cpp

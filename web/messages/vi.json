@@ -27,5 +27,6 @@
   "error": "Lỗi",
   "details": "Chi tiết",
   "preparing": "Đang tải…",
-  "starting": "Đang tải…"
+  "starting": "Đang tải…",
+  "clearRuntimeCache": "Xóa gói chạy đã lưu trong bộ nhớ đệm và thử lại? Nếu tải thất bại, hãy chọn lại gói. Các bản vẽ đã lưu được giữ nguyên."
 }

@@ -60,18 +60,17 @@ def main() -> None:
         result = {}
         languages = json.loads(args.languages)
         catalogs = read_catalogs(args.path / "krita.bundle.tar.gz", languages)
-        for label in ("&File", "Text Properties"):
-            result[label] = label
-            for language in languages:
-                if language in ("en", "en_US"):
-                    break
-                if language in catalogs:
-                    translation = gettext.GNUTranslations(
-                        io.BytesIO(catalogs[language])
-                    )
-                    if translation.gettext(label) != label:
-                        result[label] = translation.gettext(label)
-                        break
+        translation = gettext.NullTranslations()
+        for language in languages:
+            if language in ("en", "en_US"):
+                break
+            if language in catalogs:
+                translation.add_fallback(
+                    gettext.GNUTranslations(io.BytesIO(catalogs[language]))
+                )
+        result = {
+            label: translation.gettext(label) for label in ("&File", "Text Properties")
+        }
     print(json.dumps(result, ensure_ascii=False))
 
 

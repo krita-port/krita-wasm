@@ -27,5 +27,6 @@
   "error": "Viga",
   "details": "Üksikasjad",
   "preparing": "Laadimine…",
-  "starting": "Laadimine…"
+  "starting": "Laadimine…",
+  "clearRuntimeCache": "Kas eemaldada vahemällu salvestatud käituspakett ja proovida uuesti? Kui laadimine nurjub, valige pakett uuesti. Salvestatud joonistused säilivad."
 }

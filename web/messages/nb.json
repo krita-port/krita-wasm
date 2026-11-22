@@ -27,5 +27,6 @@
   "error": "Feil",
   "details": "Detaljer",
   "preparing": "Laster inn…",
-  "starting": "Laster inn…"
+  "starting": "Laster inn…",
+  "clearRuntimeCache": "Fjerne pakken fra hurtigbufferen og prøve igjen? Hvis innlastingen mislykkes, velg en pakke på nytt. Lagrede tegninger beholdes."
 }

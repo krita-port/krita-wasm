@@ -27,5 +27,6 @@
   "error": "Xato",
   "details": "Tafsilotlar",
   "preparing": "Yuklanmoqda…",
-  "starting": "Yuklanmoqda…"
+  "starting": "Yuklanmoqda…",
+  "clearRuntimeCache": "Keshdagi ishga tushirish paketini olib tashlab, qayta urinsinmi? Yuklash amalga oshmasa, paketni yana tanlang. Saqlangan rasmlar saqlanadi."
 }

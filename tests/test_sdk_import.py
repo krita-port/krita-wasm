@@ -5,6 +5,7 @@ import io
 import json
 import os
 import platform
+import shutil
 import sys
 import tarfile
 import tempfile
@@ -204,6 +205,19 @@ class NightlyReleaseTest(unittest.TestCase):
             return io.BytesIO(json.dumps(self.metadata).encode())
         return io.BytesIO(self.payloads[request.full_url])
 
+    def test_concurrent_sdk_import_verifies_the_winner(self) -> None:
+        asset = sdk_import.resolve_release()["packages"]["sdk"]["binary"]
+        archive = sdk_import.download(asset)
+        rename = Path.rename
+
+        def concurrent(source: Path, destination: Path) -> Path:
+            shutil.copytree(source, destination)
+            return rename(source, destination)
+
+        with patch.object(Path, "rename", concurrent):
+            folder = sdk_import.import_sdk("sdk", archive)
+        sdk_import.verify_tree(folder)
+
     def test_updated_nightly_reuses_names_without_reusing_stale_bytes(self) -> None:
         sdk_import.fetch()
         previous = sdk_import.prefix("sdk")
@@ -212,6 +226,45 @@ class NightlyReleaseTest(unittest.TestCase):
         self.assertNotEqual(sdk_import.prefix("sdk"), previous)
         self.assertTrue(previous.is_dir())
         sdk_import.verify()
+
+    def test_running_build_keeps_selected_release_when_nightly_refreshes(self) -> None:
+        sdk_import.fetch()
+        selected = sdk_import.release()
+        first = sdk_import.prefix("sdk")
+        self.publish(2)
+        sdk_import.fetch()
+        self.assertNotEqual(sdk_import.prefix("sdk"), first)
+        with patch.dict(os.environ, KRITA_SDK_RELEASE=json.dumps(selected)):
+            self.assertEqual(sdk_import.prefix("sdk"), first)
+            self.assertEqual(sdk_import.release(), selected)
+            sdk_import.verify()
+
+    def test_verification_keeps_its_initial_selection_during_refresh(self) -> None:
+        sdk_import.fetch()
+        first = sdk_import.release()
+        self.publish(2)
+        sdk_import.fetch()
+        second = sdk_import.release()
+        changed = sdk_import.prefix("sdk") / "target/lib/probe.a"
+        changed.write_bytes(b"concurrent selection has a corrupt library")
+        selection = self.root / "build/sdk-release.json"
+        selection.write_text(json.dumps(first))
+        digest = sdk_import.sha256
+        switched = False
+
+        def refreshing_digest(path: Path) -> str:
+            nonlocal switched
+            if not switched and path == sdk_import.archive_path(
+                first["packages"]["sdk"]["binary"]
+            ):
+                switched = True
+                selection.write_text(json.dumps(second))
+            return str(digest(path))
+
+        with patch.object(sdk_import, "sha256", side_effect=refreshing_digest):
+            sdk_import.verify()
+        self.assertTrue(switched)
+        self.assertEqual(sdk_import.release(), second)
 
     def test_bad_download_preserves_successful_selection(self) -> None:
         sdk_import.fetch()

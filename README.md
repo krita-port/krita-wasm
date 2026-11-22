@@ -18,13 +18,13 @@ Open <http://127.0.0.1:5173/>. The first visit installs a Service Worker and rel
 
 ## Documents and settings
 
-Open and Save offer the browser cache and device file transfer. The Open dialog offers a browser-cache button and a separate device upload area where you can select or drop a local image; the runtime bundle loader supports the same two upload methods. Manually saved browser files and autosave snapshots are stored in IndexedDB through IDBFS. Discarding a recovery snapshot preserves manually saved files. Browser storage belongs to the exact origin, including the port; clearing site data removes it. Export important work to your device.
+Open and Save offer the browser cache and device file transfer. The Open dialog offers a browser-cache button and a separate device upload area where you can select or drop a local image; the runtime bundle loader supports the same two upload methods. File dialogs browse only `/Documents` and its subdirectories. Internal operations can still save to other virtual paths; their complete output sets are also persisted and restored before startup. Multi-file exports download as ZIP archives containing their companion files. Manually saved browser files and autosave snapshots are stored in IndexedDB through IDBFS. Discarding a recovery snapshot preserves manually saved files. Browser storage belongs to the exact origin, including the port; clearing site data removes it. Export important work to your device.
 
 The draggable settings button controls language, widget style, appearance and corner radii. The added dialogs and download loader cover all bundled Krita languages. Appearance follows the browser by default. Krita draws its own interface through Qt and uses packaged fonts.
 
 ## Static hosting
 
-Deploy only the generated `pages/` directory to GitHub Pages or another HTTPS static host. Put `krita.bundle.tar.gz` on a GitHub Release. On GitHub Pages, the default link is inferred from the site’s owner and project path. Pass `--release-url https://github.com/OWNER/REPOSITORY/releases` when packaging to choose the link shown by the loader. The page never downloads the large runtime until the user supplies a file; no preconfigured runtime checksum is needed.
+Deploy only the generated `pages/` directory to GitHub Pages or another HTTPS static host, and put `krita.bundle.tar.gz` on a GitHub Release. Pass `--release-url https://github.com/OWNER/REPOSITORY/releases` when packaging to set the loader’s download link. If omitted on `*.github.io`, the loader infers the repository from the owner and the first URL path segment, or uses `OWNER.github.io` at the site root. That default assumes the standard user/organization site root or a project site whose first path segment matches the repository hosting the Release. Other path layouts and public hosts, including custom domains, require an explicit `--release-url`. The page never downloads the large runtime until the user supplies a file; no preconfigured runtime checksum is needed.
 
 ## Browser support
 

@@ -27,5 +27,6 @@
   "error": "Kesalahan",
   "details": "Rincian",
   "preparing": "Memuat…",
-  "starting": "Memuat…"
+  "starting": "Memuat…",
+  "clearRuntimeCache": "Hapus paket runtime yang tersimpan di cache dan coba lagi? Jika pemuatan gagal, pilih paket lagi. Gambar yang disimpan tetap ada."
 }

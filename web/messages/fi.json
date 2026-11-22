@@ -27,5 +27,6 @@
   "error": "Virhe",
   "details": "Tiedot",
   "preparing": "Ladataan…",
-  "starting": "Ladataan…"
+  "starting": "Ladataan…",
+  "clearRuntimeCache": "Poistetaanko välimuistin paketti ja yritetään uudelleen? Jos lataus epäonnistuu, valitse paketti uudelleen. Tallennetut piirrokset säilyvät."
 }

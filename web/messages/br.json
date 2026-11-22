@@ -27,5 +27,6 @@
   "error": "Fazi",
   "details": "Munudoù",
   "preparing": "O kargañ…",
-  "starting": "O kargañ…"
+  "starting": "O kargañ…",
+  "clearRuntimeCache": "Dilemel ar pakad er cʼhrubuilh hag adklask? Ma cʼhwit ar cʼhargañ, dibabit ur pakad en-dro. Miret e vo an tresadennoù enrollet."
 }

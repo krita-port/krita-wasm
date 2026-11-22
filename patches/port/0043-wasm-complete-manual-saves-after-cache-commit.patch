@@ -8,39 +8,207 @@ Gate the shared document completion on IDBFS acknowledgement before changing
 metadata, clearing the dirty state or emitting save/download success. Keep
 save/export callers waiting for that completion so failure cancels closing.
 Autosave retains its separate completion path; desktop behavior is unchanged.
+Commit manual bytes before deleting recovery data, and preserve an existing
+layered snapshot across non-native saves until its synchronous native replacement is durable. Register recent URLs
+after successful synchronous completion instead of queuing an already-fired signal.
+User file dialogs select the browser cache; internal virtual destinations remain supported. Stage manual exports outside IDBFS; copy and restore targets inside the serialized
+commit queue so a rejected save cannot be published by a later sync. Normalize
+canonical browser paths for incremental saves.
+Related desktop save-failure reports (not IDBFS):
+https://bugs.kde.org/show_bug.cgi?id=506760
+https://bugs.kde.org/show_bug.cgi?id=522480
+Keep the existing exporter physical/logical path separation: KRA and KRZ links use the
+logical filename, while QML companion images use the physical output directory.
+Commit every regular output produced by the exporter, not only the main file.
+Upstream issue searches for browser staging, relative file-layer paths and
+multi-file export commits found no matching report.
 
-diff --git a/libs/ui/KisMainWindow.cpp b/libs/ui/KisMainWindow.cpp
---- a/libs/ui/KisMainWindow.cpp
-+++ b/libs/ui/KisMainWindow.cpp
-@@ -1381,6 +1381,10 @@
- #ifdef Q_OS_WASM
-     const QDir browserFiles(QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR")));
-     if (!document->path().startsWith(browserFiles.absolutePath() + QLatin1Char('/'))) {
-+        // Uploads are readable temporary files, not browser-cache destinations.
-+        // This policy also covers Save invoked by closing views or quitting.
-+        if (!isExporting)
-+            saveas = true;
-         const QString saved = document->property("kritaWasmSavedPath").toString();
-         const QString name = QFileInfo(document->path()).fileName();
-         suggestedURL = !saved.isEmpty() ? QUrl::fromLocalFile(saved)
+Set the native companion filter logical filename as well as its staged path.
+Upstream searches for cache imports and companion KRA linked assets found no matching issue.
+
+Reserve import recovery identity before probing its original source, keeping
+relative assets intact without adopting the source's browser save identity.
+
+Route Convert to File Layer through the bounded browser-cache file picker and
+shared acknowledged exporter, so its referenced image outlives uploaded inputs.
+Upstream searches found no corresponding WebAssembly persistence issue; inspected
+related desktop conversion crash (not this cache defect):
+https://bugs.kde.org/show_bug.cgi?id=445831
+
+Store configured backups beside the persistent output, so the acknowledged
+primary commit includes the previous version. Use the same physical mapping
+for incremental backups and validate/restore actual cached files in Open Recent.
+Upstream searches found no matching WebAssembly backup/recent-file report.
+
+Route welcome-page Recent clicks through the same cached-file opener as the
+File menu. Remove missing entries only after persistent-file validation, not
+when the user cancels named recovery. Upstream issue searches found no matching
+WebAssembly cache-alias/recovery-cancellation report; the related welcome-page
+preview crash https://bugs.kde.org/show_bug.cgi?id=520362 has a different cause.
+
+Synchronous exports to browser-cache destinations use the same staged output-set
+commit and rollback as other manual exports. Layer export, Image Split and
+Convert to File Layer therefore wait for persistence through one shared API.
+Temporary resource and recovery exports keep their original synchronous path.
+Upstream searches found no matching IndexedDB synchronous-export report.
+
+Persist synchronous user exports by default, including new virtual paths from
+Save Group Layers. Internal recovery, resource and template exports explicitly
+remain temporary. Copied identical animation frames use the same acknowledged
+output transaction as rendered frames. Upstream searches found no matching
+WebAssembly persistence report.
+
+Treat an uncached device input as a first save before incremental backup copies bytes. Ask for the persistent destination through the existing first-save branch, so the backup never belongs only to the upload directory. Internal incremental paths of already cached documents remain supported. Upstream issue searches found no matching WebAssembly upload-lifetime report.
+
+Persist referenced uploaded file-layer inputs before native autosave, and in the same transaction as manual saves. Failed input persistence postpones autosave using its existing retry delay. Upstream issue searches found no matching WebAssembly upload/linked-recovery report.
+
+Normalize complete logical file-layer paths before filesystem traversal on Wasm. Documents is an alias into IDBFS, so traversing its symlink before a following .. would incorrectly leave the logical root. Preserve persistent input aliases when releasing an upload group, including for another cached document still using them. Upstream issue searches found no matching WebAssembly logical-root report.
+
+Keep uploaded file-layer identity in Wasm-only KRA metadata when closed browser sessions move saved documents. Retain ordinary sibling source names for desktop/device reopening. Upstream issue searches found no corresponding browser-session migration report; relative file-layer design is discussed in https://bugs.kde.org/show_bug.cgi?id=413594.
+
+Record the source session of persistent file layers in autosave snapshots so
+closed-session imports remap their links without rewriting KRA archives or
+opening a same-named file from the primary session. Relative file-layer design
+is discussed in https://bugs.kde.org/show_bug.cgi?id=413594; no matching
+WebAssembly autosave import issue was found.
+
+Make animation frame removal use the acknowledged browser cache transaction,
+including the backing files of virtual outputs. No matching upstream
+WebAssembly animation cleanup issue was found.
+
 diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
 --- a/libs/ui/KisDocument.cpp
 +++ b/libs/ui/KisDocument.cpp
-@@ -7,6 +7,7 @@
+@@ -6,7 +6,10 @@
+  */
  
  #include "KisMainWindow.h" // XXX: remove
- #include <QMessageBox>
 +#include <QEventLoop>
++#include <QPointer>
+ #include <QMessageBox>
++#include <QTemporaryDir>
  
  #include <KisMimeDatabase.h>
  
-@@ -880,6 +881,24 @@
-                 i18n("Exporting Document...") :
-                 i18n("Saving Document...");
+@@ -720,23 +723,24 @@
+     delete d;
+ }
  
+-QString KisDocument::embeddedResourcesStorageId() const
+-{
+-    return d->embeddedResourcesStorageID;
+-}
+-
+-QString KisDocument::linkedResourcesStorageId() const
+-{
+-    return d->linkedResourcesStorageID;
+-}
+-
+-KisDocument *KisDocument::clone(bool addStorage)
+-{
+-    return new KisDocument(*this, addStorage);
+-}
+-
+-bool KisDocument::exportDocumentImpl(const KritaUtils::ExportFileJob &job, KisPropertiesConfigurationSP exportConfiguration, bool isAdvancedExporting)
+-{
++QString KisDocument::embeddedResourcesStorageId() const { return d->embeddedResourcesStorageID; }
++
++QString KisDocument::linkedResourcesStorageId() const { return d->linkedResourcesStorageID; }
++
++KisDocument *KisDocument::clone(bool addStorage) { return new KisDocument(*this, addStorage); }
++
++bool KisDocument::exportDocumentImpl(const KritaUtils::ExportFileJob &requestedJob,
++                                     KisPropertiesConfigurationSP exportConfiguration,
++                                     bool isAdvancedExporting) {
++#ifdef Q_OS_WASM
++    auto job = requestedJob;
++    extern QString kritaWasmCachePath(const QString &);
++    const QString cachePath = kritaWasmCachePath(job.filePath);
++    if (!cachePath.isEmpty())
++        job.filePath = cachePath;
++#else
++    const auto &job = requestedJob;
++#endif
+     // ANDROID NOTES (other comments in this file reference this one!)
+     //
+     // The Android file system doesn't work like on a real operating system.
+@@ -778,7 +782,13 @@
+     // that hard. Well, at least none of the ones that actually save files, as
+     // mentioned above some of them just seem to lose whatever you give them.
+ 
+-    QFileInfo filePathInfo(job.filePath);
++#ifdef Q_OS_WASM
++    extern QString kritaWasmStoragePath(const QString &);
++    const QString backupPath = kritaWasmStoragePath(job.filePath);
++#else
++    const QString &backupPath = job.filePath;
++#endif
++    QFileInfo filePathInfo(backupPath);
+     bool fileExists = filePathInfo.exists();
+ #ifdef Q_OS_ANDROID
+     if (fileExists) {
+@@ -828,11 +838,18 @@
+             break;
+         }
+ 
++#ifdef Q_OS_WASM
++        if (!backupDir.isEmpty()) {
++            backupDir = QFileInfo(kritaWasmStoragePath(
++                QDir(backupDir).filePath(QFileInfo(job.filePath).fileName()))).absolutePath();
++            QDir().mkpath(backupDir);
++        }
++#endif
+         int numOfBackupsKept = cfg.readEntry<int>("numberofbackupfiles", 1);
+         QString suffix = cfg.readEntry<QString>("backupfilesuffix", "~");
+ 
+         if (numOfBackupsKept == 1) {
+-            if (!KisBackup::simpleBackupFile(job.filePath, backupDir, suffix)) {
++            if (!KisBackup::simpleBackupFile(backupPath, backupDir, suffix)) {
+                 qWarning() << "Failed to create simple backup file!" << job.filePath << backupDir << suffix;
+                 KisUsageLogger::log(QString("Failed to create a simple backup for %1 in %2.")
+                                         .arg(job.filePath, backupDir.isEmpty()
+@@ -849,7 +866,7 @@
+             }
+         }
+         else if (numOfBackupsKept > 1) {
+-            if (!KisBackup::numberedBackupFile(job.filePath, backupDir, suffix, numOfBackupsKept)) {
++            if (!KisBackup::numberedBackupFile(backupPath, backupDir, suffix, numOfBackupsKept)) {
+                 qWarning() << "Failed to create numbered backup file!" << job.filePath << backupDir << suffix;
+                 KisUsageLogger::log(QString("Failed to create a numbered backup for %2.")
+                                         .arg(job.filePath, backupDir.isEmpty()
+@@ -872,18 +889,47 @@
+         KisImportExportErrorCode error = ImportExportCodes::FileFormatNotSupported;
+         slotCompleteSavingDocument(job, error, error.errorMessage(), "");
+         return false;
+-
+-    }
+-
+-    const QString actionName =
+-            job.flags & KritaUtils::SaveIsExporting ?
+-                i18n("Exporting Document...") :
+-                i18n("Saving Document...");
+-
+-    KritaUtils::BackgroudSavingStartResult result =
+-            initiateSavingInBackground(actionName,
+-                                       this, SLOT(slotCompleteSavingDocument(KritaUtils::ExportFileJob, KisImportExportErrorCode, QString, QString)),
+-                                       job, exportConfiguration, isAdvancedExporting);
++    }
++
++    const QString actionName = job.flags & KritaUtils::SaveIsExporting
++                                   ? i18n("Exporting Document...")
++                                   : i18n("Saving Document...");
++
 +#ifdef Q_OS_WASM
 +    // A started background write is not a durable browser save. Keep all
 +    // manual callers (including close/quit) waiting for the common completion.
++    QTemporaryDir browserStaging;
++    if (!browserStaging.isValid()) {
++        slotCompleteSavingDocument(job, ImportExportCodes::ErrorWhileWriting, QString(), QString());
++        return false;
++    }
++    auto stagedJob = job;
++    stagedJob.filePath = browserStaging.filePath(QFileInfo(job.filePath).fileName());
++    stagedJob.realFilePath = job.filePath;
 +    QEventLoop saveLoop;
 +    bool finished = false;
 +    bool succeeded = false;
@@ -56,10 +224,19 @@ diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
 +    });
 +#endif
 +
-     KritaUtils::BackgroudSavingStartResult result =
-             initiateSavingInBackground(actionName,
-                                        this, SLOT(slotCompleteSavingDocument(KritaUtils::ExportFileJob, KisImportExportErrorCode, QString, QString)),
-@@ -922,7 +941,13 @@
++    KritaUtils::BackgroudSavingStartResult result = initiateSavingInBackground(
++        actionName, this,
++        SLOT(slotCompleteSavingDocument(KritaUtils::ExportFileJob, KisImportExportErrorCode,
++                                        QString, QString)),
++#ifdef Q_OS_WASM
++        stagedJob, exportConfiguration, isAdvancedExporting);
++#else
++        job, exportConfiguration, isAdvancedExporting);
++#endif
+ 
+     if (result != KritaUtils::BackgroudSavingStartResult::Success) {
+         QString errorShortLog;
+@@ -922,11 +968,18 @@
          return false;
      }
  
@@ -69,15 +246,35 @@ diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
 +    return result == KritaUtils::BackgroudSavingStartResult::Success && succeeded;
 +#else
      return (result == KritaUtils::BackgroudSavingStartResult::Success);
+-}
+-
+-bool KisDocument::exportDocument(const QString &path, const QByteArray &mimeType, bool isAdvancedExporting, bool showWarnings, KisPropertiesConfigurationSP exportConfiguration)
+-{
 +#endif
- }
++}
++
++bool KisDocument::exportDocument(const QString &path, const QByteArray &mimeType,
++                                 bool isAdvancedExporting, bool showWarnings,
++                                 KisPropertiesConfigurationSP exportConfiguration) {
+     using namespace KritaUtils;
  
- bool KisDocument::exportDocument(const QString &path, const QByteArray &mimeType, bool isAdvancedExporting, bool showWarnings, KisPropertiesConfigurationSP exportConfiguration)
-@@ -1039,8 +1064,24 @@
+     SaveFlags flags = SaveIsExporting;
+@@ -1037,10 +1090,41 @@
+     }
+ };
  
- void KisDocument::slotCompleteSavingDocument(const KritaUtils::ExportFileJob &job, KisImportExportErrorCode status, const QString &errorMessage, const QString &warningMessage)
- {
+-void KisDocument::slotCompleteSavingDocument(const KritaUtils::ExportFileJob &job, KisImportExportErrorCode status, const QString &errorMessage, const QString &warningMessage)
+-{
 -    if (status.isCancelled())
++void KisDocument::slotCompleteSavingDocument(const KritaUtils::ExportFileJob &incomingJob,
++                                             KisImportExportErrorCode status,
++                                             const QString &errorMessage,
++                                             const QString &warningMessage) {
++    auto job = incomingJob;
++#ifdef Q_OS_WASM
++    if (!job.realFilePath.isEmpty())
++        job.filePath = job.realFilePath;
++#endif
 +    if (status.isCancelled()) {
 +#ifdef Q_OS_WASM
 +        Q_EMIT canceled(QString());
@@ -86,37 +283,860 @@ diff --git a/libs/ui/KisDocument.cpp b/libs/ui/KisDocument.cpp
 +    }
 +
 +#ifdef Q_OS_WASM
++    // Close/quit must not outlive a queued native autosave after flattening.
++    // Reuse the synchronous exporter while input remains excluded by saveLoop.
++    if (status.isOk() && !(job.flags & KritaUtils::SaveIsExporting) && job.mimeType != nativeFormatMimeType()
++        && !exportDocumentSync(generateAutoSaveFileName(localFilePath()), nativeFormatMimeType(), {}, true))
++        status = ImportExportCodes::ErrorWhileWriting;
 +    if (status.isOk()) {
 +        // Keep isSaving()/close waiters active through the IDBFS commit, before
 +        // marking the undo stack clean or notifying any save/download observer.
 +        std::unique_lock<QMutex> persistenceLock(d->savingMutex);
-+        extern bool kritaWasmCommitSavedFile(KisDocument *, const QString &, bool);
-+        if (!kritaWasmCommitSavedFile(this, job.filePath,
-+                                     job.flags & KritaUtils::SaveIsExporting))
++        extern bool kritaWasmCommitSavedFile(KisDocument *, const QString &, const QString &, bool, bool);
++        if (!kritaWasmCommitSavedFile(this,
++                                      job.filePath,
++                                      incomingJob.filePath,
++                                      job.flags & KritaUtils::SaveIsExporting,
++                                      job.mimeType == nativeFormatMimeType()))
 +            status = ImportExportCodes::ErrorWhileWriting;
 +    }
 +#endif
  
      const QString fileName = QFileInfo(job.filePath).fileName();
  
-@@ -1060,6 +1101,10 @@
+@@ -1060,8 +1144,11 @@
  
              dlg.exec();
          }
+-    }
+-    else {
 +#ifdef Q_OS_WASM
 +        // Failure must release the same manual-save wait as cancellation.
 +        Q_EMIT canceled(QString());
 +#endif
-     }
-     else {
++    } else {
          if (!fileBatchMode() && !warningMessage.isEmpty()) {
-@@ -1090,9 +1135,6 @@
+ 
+             QStringList reasons = warningMessage.split("\n", Qt::SkipEmptyParts);
+@@ -1080,7 +1167,6 @@
+             dlg.exec();
+         }
+ 
+-
+         if (!(job.flags & KritaUtils::SaveIsExporting)) {
+ #ifndef Q_OS_WASM
+             const QString existingAutoSaveBaseName = localFilePath();
+@@ -1089,16 +1175,7 @@
+ 
              d->updateDocumentMetadataOnSaving(job.filePath, job.mimeType);
  
- #ifdef Q_OS_WASM
+-#ifdef Q_OS_WASM
 -            // Manual files and autosave recovery have independent lifetimes.
 -            extern bool kritaWasmKeepSavedFile(KisDocument *, const QString &);
 -            kritaWasmKeepSavedFile(this, job.filePath);
-             if (job.mimeType != nativeFormatMimeType()) {
-                 // Preserve native layers even when Save writes a flattened format.
-                 setProperty("kritaWasmRecoveryAfterSave", true);
+-            if (job.mimeType != nativeFormatMimeType()) {
+-                // Preserve native layers even when Save writes a flattened format.
+-                setProperty("kritaWasmRecoveryAfterSave", true);
+-                QTimer::singleShot(0, this, SLOT(slotAutoSave()));
+-            }
+-#else
++#ifndef Q_OS_WASM
+             removeAutoSaveFiles(existingAutoSaveBaseName, wasRecovered);
+ #endif
+         }
+@@ -1344,7 +1421,10 @@
+     }
+ }
+ 
+-bool KisDocument::exportDocumentSync(const QString &path, const QByteArray &mimeType, KisPropertiesConfigurationSP exportConfiguration)
++bool KisDocument::exportDocumentSync(const QString &path,
++                                     const QByteArray &mimeType,
++                                     KisPropertiesConfigurationSP exportConfiguration,
++                                     bool temporary)
+ {
+     {
+         /**
+@@ -1359,17 +1439,39 @@
+         }
+     }
+ 
++#ifdef Q_OS_WASM
++    extern QString kritaWasmCachePath(const QString &);
++    const QString cached = kritaWasmCachePath(path);
++    std::unique_ptr<QTemporaryDir> browserStaging;
++    QString location = path;
++    QString realLocation = path;
++    if (!temporary) {
++        browserStaging = std::make_unique<QTemporaryDir>();
++        if (!browserStaging->isValid())
++            return false;
++        realLocation = cached.isEmpty() ? QDir::cleanPath(QFileInfo(path).absoluteFilePath()) : cached;
++        location = browserStaging->filePath(QFileInfo(realLocation).fileName());
++    }
++#else
++    Q_UNUSED(temporary);
++    const QString &location = path;
++    const QString &realLocation = path;
++#endif
+     d->savingImage = d->image;
+ 
+     KisImportExportErrorCode status =
+-            d->importExportManager->
+-            exportDocument(path, path, mimeType, false, exportConfiguration);
++        d->importExportManager->exportDocument(location, realLocation, mimeType, false, exportConfiguration);
+ 
+     d->savingImage = 0;
+ 
++#ifdef Q_OS_WASM
++    if (status.isOk() && browserStaging) {
++        extern bool kritaWasmCommitSavedFile(KisDocument *, const QString &, const QString &, bool, bool);
++        return kritaWasmCommitSavedFile(this, realLocation, location, true, mimeType == nativeFormatMimeType());
++    }
++#endif
+     return status.isOk();
+ }
+-
+ 
+ KritaUtils::BackgroudSavingStartResult KisDocument::initiateSavingInBackground(const QString actionName,
+                                              const QObject *receiverObject, const char *receiverMethod,
+@@ -1466,28 +1568,30 @@
+     }
+ 
+     connect(d->backgroundSaveDocument.get(),
+-            SIGNAL(sigBackgroundSavingFinished(KisImportExportErrorCode, QString, QString)),
+-            this,
++            SIGNAL(sigBackgroundSavingFinished(KisImportExportErrorCode, QString, QString)), this,
+             SLOT(slotChildCompletedSavingInBackground(KisImportExportErrorCode, QString, QString)));
+-
+ 
+     if (d->completeSavingConnection) {
+         disconnect(d->completeSavingConnection);
+     }
+-    d->completeSavingConnection = connect(
+-        this, SIGNAL(sigCompleteBackgroundSaving(KritaUtils::ExportFileJob, KisImportExportErrorCode, QString, QString)),
+-        receiverObject, receiverMethod);
+-
+-    KisImportExportErrorCode error =
+-            d->backgroundSaveDocument->startExportInBackground(actionName,
+-                                                               job.filePath,
+-                                                               job.filePath,
+-                                                               job.mimeType,
+-                                                               job.flags & KritaUtils::SaveShowWarnings,
+-                                                               exportConfiguration, isAdvancedExporting);
++    d->completeSavingConnection =
++        connect(this,
++                SIGNAL(sigCompleteBackgroundSaving(KritaUtils::ExportFileJob,
++                                                   KisImportExportErrorCode, QString, QString)),
++                receiverObject, receiverMethod);
++
++    KisImportExportErrorCode error = d->backgroundSaveDocument->startExportInBackground(
++        actionName, job.filePath,
++#ifdef Q_OS_WASM
++        job.realFilePath.isEmpty() ? job.filePath : job.realFilePath,
++#else
++        job.filePath,
++#endif
++        job.mimeType, job.flags & KritaUtils::SaveShowWarnings, exportConfiguration,
++        isAdvancedExporting);
+     if (!error.isOk()) {
+         // the state should have been deinitialized in slotChildCompletedSavingInBackground()
+-        KIS_SAFE_ASSERT_RECOVER (!d->backgroundSaveDocument && !d->backgroundSaveJob.isValid()) {
++        KIS_SAFE_ASSERT_RECOVER(!d->backgroundSaveDocument && !d->backgroundSaveJob.isValid()) {
+             d->backgroundSaveDocument.release()->deleteLater();
+             d->savingMutex.unlock();
+             d->backgroundSaveJob = KritaUtils::ExportFileJob();
+@@ -1542,21 +1646,30 @@
+     d->completeSavingConnection = {};
+ }
+ 
+-void KisDocument::slotAutoSaveImpl(std::unique_ptr<KisDocument> &&optionalClonedDocument)
+-{
+-    if (!d->modified || !d->modifiedAfterAutosave) {
+-#ifdef Q_OS_WASM
+-        if (!property("kritaWasmRecoveryAfterSave").toBool()) return;
+-#else
++void KisDocument::slotAutoSaveImpl(std::unique_ptr<KisDocument> &&optionalClonedDocument) {
++    if (!d->modified || !d->modifiedAfterAutosave)
+         return;
+-#endif
+-    }
+     // Modal dialogs may themselves start saving or discard this document.
+     // Do not start a competing background snapshot from their nested loop.
+     if (qApp->activeModalWidget()) {
+         setAutoSaveDelay(10);
+         return;
+     }
++#ifdef Q_OS_WASM
++    if (property("kritaWasmPreparingAutoSave").toBool())
++        return;
++    extern bool kritaWasmPersistUploadedReferences(KisDocument *);
++    const QPointer<KisDocument> guarded(this);
++    setProperty("kritaWasmPreparingAutoSave", true);
++    const bool prepared = kritaWasmPersistUploadedReferences(this);
++    if (!guarded)
++        return;
++    setProperty("kritaWasmPreparingAutoSave", false);
++    if (!prepared) {
++        setAutoSaveDelay(10);
++        return;
++    }
++#endif
+     const QString autoSaveFileName = generateAutoSaveFileName(localFilePath());
+ 
+     Q_EMIT statusBarMessage(i18n("Autosaving... %1", autoSaveFileName), successMessageTimeout);
+@@ -1635,7 +1748,7 @@
+                             exportConfiguration->setProperty("name", res->name());
+                         }
+ 
+-                        if (exportDocumentSync(tempFileName, mimeType, exportConfiguration)) {
++                        if (exportDocumentSync(tempFileName, mimeType, exportConfiguration, true)) {
+                             QFile f2(tempFileName);
+                             KIS_SAFE_ASSERT_RECOVER_RETURN_VALUE(f2.open(QFile::ReadOnly), false);
+ 
+@@ -1661,11 +1774,10 @@
+                 }
+                 else {
+                     d->modifiedWhileSaving = false;
+-                    if (exportDocumentSync(tempFileName, mimeType, exportConfiguration)) {
++                    if (exportDocumentSync(tempFileName, mimeType, exportConfiguration, true)) {
+                         KoResourceSP res = model.importResourceFile(tempFileName, false);
+                         if (res) {
+-                            const QString filePath =
+-                                KisResourceLocator::instance()->filePathForResource(res);
++                            const QString filePath = KisResourceLocator::instance()->filePathForResource(res);
+ 
+                             d->updateDocumentMetadataOnSaving(filePath, mimeType);
+ 
+@@ -1716,13 +1828,10 @@
+     if (!status.isOk()) {
+         setEmergencyAutoSaveInterval();
+         Q_EMIT statusBarMessage(i18nc("%1 --- failing file name, %2 --- error message",
+-                                    "Error during autosaving %1: %2",
+-                                    fileName,
+-                                    exportErrorToUserMessage(status, errorMessage)), errorMessageTimeout);
++                                      "Error during autosaving %1: %2", fileName,
++                                      exportErrorToUserMessage(status, errorMessage)),
++                                errorMessageTimeout);
+     } else {
+-#ifdef Q_OS_WASM
+-        setProperty("kritaWasmRecoveryAfterSave", false);
+-#endif
+         KisConfig cfg(true);
+         d->autoSaveDelay = cfg.autoSaveInterval();
+ 
+@@ -1971,6 +2080,12 @@
+ bool KisDocument::importDocument(const QString &_path)
+ {
+     bool ret;
++
++#ifdef Q_OS_WASM
++    // Reserve an independent recovery identity before openPath probes the
++    // source. Import must not offer or remove that source's named autosave.
++    (void)generateAutoSaveFileName(QString());
++#endif
+ 
+     dbgUI << "path=" << _path;
+ 
+@@ -2158,15 +2273,12 @@
+ 
+     const QString autoSaveFileName = generateAutoSaveFileName(localFilePath());
+ 
+-    bool started = exportDocumentSync(autoSaveFileName, nativeFormatMimeType());
+-
+-    if (started)
+-    {
++    bool started = exportDocumentSync(autoSaveFileName, nativeFormatMimeType(), {}, true);
++
++    if (started) {
+         d->modifiedAfterAutosave = false;
+         dbgAndroid << "autoSaveOnPause successful";
+-    }
+-    else
+-    {
++    } else {
+         qWarning() << "Could not auto-save when paused";
+     }
+ }
+diff --git a/libs/ui/KisImportExportManager.cpp b/libs/ui/KisImportExportManager.cpp
+index 09d250e..4cd3d85 100644
+--- a/libs/ui/KisImportExportManager.cpp
++++ b/libs/ui/KisImportExportManager.cpp
+@@ -451,26 +451,44 @@ KisImportExportManager::ConversionResult KisImportExportManager::convert(KisImpo
+         }
+ 
+         KisUsageLogger::log(
+-            QString(
+-                "Converting from %1 to %2. Location: %3. Real location: %4. Batchmode: %5. Configuration: %6")
+-                .arg(QString::fromLatin1(from), QString::fromLatin1(to), location, realLocation,
++            QString("Converting from %1 to %2. Location: %3. Real location: %4. Batchmode: %5. Configuration: %6")
++                .arg(QString::fromLatin1(from),
++                     QString::fromLatin1(to),
++                     location,
++                     realLocation,
+                      QString::number(batchMode()),
+                      (exportConfiguration ? exportConfiguration->toXML() : "none")));
+ 
+         const QString alsoAsKraLocation = alsoAsKra ? getAlsoAsKraLocation(location) : QString();
++#ifdef Q_OS_WASM
++        const QString alsoAsKraRealLocation =
++            alsoAsKra ? getAlsoAsKraLocation(realLocation.isEmpty() ? location : realLocation) : QString();
++#else
++        const QString alsoAsKraRealLocation = alsoAsKraLocation;
++#endif
+         if (isAsync) {
+-            result = QtConcurrent::run(std::bind(&KisImportExportManager::doExport, this, location, filter,
+-                                                 exportConfiguration, alsoAsKraLocation));
++            result = QtConcurrent::run(std::bind(&KisImportExportManager::doExport,
++                                                 this,
++                                                 location,
++                                                 filter,
++                                                 exportConfiguration,
++                                                 alsoAsKraLocation,
++                                                 alsoAsKraRealLocation));
+ 
+             // we should explicitly report that the exporting has been initiated
+             result.setStatus(ImportExportCodes::OK);
+ 
+         } else if (!batchMode()) {
+             KisAsyncActionFeedback f(i18n("Saving document..."), 0);
+-            result = f.runAction(std::bind(&KisImportExportManager::doExport, this, location, filter,
+-                                           exportConfiguration, alsoAsKraLocation));
++            result = f.runAction(std::bind(&KisImportExportManager::doExport,
++                                           this,
++                                           location,
++                                           filter,
++                                           exportConfiguration,
++                                           alsoAsKraLocation,
++                                           alsoAsKraRealLocation));
+         } else {
+-            result = doExport(location, filter, exportConfiguration, alsoAsKraLocation);
++            result = doExport(location, filter, exportConfiguration, alsoAsKraLocation, alsoAsKraRealLocation);
+         }
+ 
+         if (exportConfiguration && !batchMode()) {
+@@ -752,10 +770,10 @@ KisImportExportErrorCode KisImportExportManager::doImport(const QString &locatio
+ KisImportExportErrorCode KisImportExportManager::doExport(const QString &location,
+                                                           QSharedPointer<KisImportExportFilter> filter,
+                                                           KisPropertiesConfigurationSP exportConfiguration,
+-                                                          const QString alsoAsKraLocation)
++                                                          const QString alsoAsKraLocation,
++                                                          const QString alsoAsKraRealLocation)
+ {
+-    KisImportExportErrorCode status =
+-            doExportImpl(location, filter, exportConfiguration);
++    KisImportExportErrorCode status = doExportImpl(location, filter, exportConfiguration);
+ 
+     if (!alsoAsKraLocation.isNull() && status.isOk()) {
+         QByteArray mime = m_document->nativeFormatMimeType();
+@@ -766,9 +784,9 @@ KisImportExportErrorCode KisImportExportManager::doExport(const QString &locatio
+ 
+         if (filter) {
+             filter->setFilename(alsoAsKraLocation);
++            filter->setRealFilename(alsoAsKraRealLocation);
+ 
+-            KisPropertiesConfigurationSP kraExportConfiguration =
+-                    filter->lastSavedConfiguration(mime, mime);
++            KisPropertiesConfigurationSP kraExportConfiguration = filter->lastSavedConfiguration(mime, mime);
+ 
+             status = doExportImpl(alsoAsKraLocation, filter, kraExportConfiguration);
+         } else {
+diff --git a/libs/ui/KisImportExportManager.h b/libs/ui/KisImportExportManager.h
+index 0a1cd00..c498166 100644
+--- a/libs/ui/KisImportExportManager.h
++++ b/libs/ui/KisImportExportManager.h
+@@ -127,8 +127,14 @@ private:
+ 
+     KisImportExportErrorCode doImport(const QString &location, QSharedPointer<KisImportExportFilter> filter);
+ 
+-    KisImportExportErrorCode doExport(const QString &location, QSharedPointer<KisImportExportFilter> filter, KisPropertiesConfigurationSP exportConfiguration, const QString alsoAsKraLocation);
+-    KisImportExportErrorCode doExportImpl(const QString &location, QSharedPointer<KisImportExportFilter> filter, KisPropertiesConfigurationSP exportConfiguration);
++    KisImportExportErrorCode doExport(const QString &location,
++                                      QSharedPointer<KisImportExportFilter> filter,
++                                      KisPropertiesConfigurationSP exportConfiguration,
++                                      const QString alsoAsKraLocation,
++                                      const QString alsoAsKraRealLocation);
++    KisImportExportErrorCode doExportImpl(const QString &location,
++                                          QSharedPointer<KisImportExportFilter> filter,
++                                          KisPropertiesConfigurationSP exportConfiguration);
+ 
+     QString getAlsoAsKraLocation(const QString location) const;
+ 
+diff --git a/libs/ui/KisImportExportUtils.h b/libs/ui/KisImportExportUtils.h
+index 570ab44..db67598 100644
+--- a/libs/ui/KisImportExportUtils.h
++++ b/libs/ui/KisImportExportUtils.h
+@@ -40,21 +40,18 @@ Q_DECLARE_FLAGS(SaveFlags, SaveFlag)
+ Q_DECLARE_OPERATORS_FOR_FLAGS(SaveFlags)
+ 
+ struct ExportFileJob {
+-    ExportFileJob()
+-        : flags(SaveNone)
+-    {
+-    }
++    ExportFileJob() : flags(SaveNone) {}
+ 
+     ExportFileJob(QString _filePath, QByteArray _mimeType, SaveFlags _flags = SaveNone)
+-        : filePath(_filePath), mimeType(_mimeType), flags(_flags)
+-    {
+-    }
++        : filePath(_filePath), mimeType(_mimeType), flags(_flags) {}
+ 
+-    bool isValid() const {
+-        return !filePath.isEmpty();
+-    }
++    bool isValid() const { return !filePath.isEmpty(); }
+ 
+     QString filePath;
++#ifdef Q_OS_WASM
++    // Physical staging must not change the path used for linked resources.
++    QString realFilePath;
++#endif
+     QByteArray mimeType;
+     SaveFlags flags;
+ };
+diff --git a/libs/ui/KisMainWindow.cpp b/libs/ui/KisMainWindow.cpp
+--- a/libs/ui/KisMainWindow.cpp
++++ b/libs/ui/KisMainWindow.cpp
+@@ -1090,8 +1090,7 @@
+     return 0;
+ }
+ 
+-bool KisMainWindow::openDocument(const QString &path, OpenFlags flags)
+-{
++bool KisMainWindow::openDocument(const QString &path, OpenFlags flags) {
+     ScopedWidgetDisabler disabler(d->welcomePage->dropFrameBorder);
+     QApplication::processEvents(); // make UI more responsive
+ 
+@@ -1380,11 +1379,17 @@
+     QUrl suggestedURL = QUrl::fromLocalFile(document->path());
+ #ifdef Q_OS_WASM
+     const QDir browserFiles(QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR")));
+-    if (!document->path().startsWith(browserFiles.absolutePath() + QLatin1Char('/'))) {
++    extern QString kritaWasmCachePath(const QString &);
++    if (kritaWasmCachePath(document->path()).isEmpty()) {
++        // Uploads are readable temporary files, not browser-cache destinations.
++        // This policy also covers Save invoked by closing views or quitting.
++        if (!isExporting)
++            saveas = true;
+         const QString saved = document->property("kritaWasmSavedPath").toString();
+         const QString name = QFileInfo(document->path()).fileName();
+         suggestedURL = !saved.isEmpty() ? QUrl::fromLocalFile(saved)
+-            : name.isEmpty() ? QUrl() : QUrl::fromLocalFile(browserFiles.filePath(name));
++                       : name.isEmpty() ? QUrl()
++                                        : QUrl::fromLocalFile(browserFiles.filePath(name));
+     }
+ #endif
+ 
+@@ -1485,6 +1490,13 @@
+         if (newFilePath.isEmpty()) {
+             bOk = false;
+         }
++#ifdef Q_OS_WASM
++        if (bOk) {
++            const QString cachePath = kritaWasmCachePath(newFilePath);
++            if (!cachePath.isEmpty())
++                newFilePath = cachePath;
++        }
++#endif
+ 
+         if (bOk) {
+             if (document->documentInfo()->aboutInfo("title") == i18n("Unnamed")) {
+@@ -1523,24 +1535,30 @@
+                     ret = document->saveAs(newFilePath, outputFormat, true);
+                     if (ret) {
+                         dbgUI << "Successful Save As!";
+-                        KisPart::instance()->queueAddRecentURLToAllMainWindowsOnFileSaved(QUrl::fromLocalFile(newFilePath));
++#ifdef Q_OS_WASM
++                        // Wasm saveAs returns only after the completion signal.
++                        KisPart::instance()->addRecentURLToAllMainWindows(
++                            QUrl::fromLocalFile(newFilePath));
++#else
++                        KisPart::instance()->queueAddRecentURLToAllMainWindowsOnFileSaved(
++                            QUrl::fromLocalFile(newFilePath));
++#endif
+                     } else {
+                         dbgUI << "Failed Save As!";
+-
+                     }
+-                }
+-                else { // Export
+-                    ret = document->exportDocument(newFilePath, outputFormat, isAdvancedExporting, false);
++                } else { // Export
++                    ret = document->exportDocument(newFilePath, outputFormat, isAdvancedExporting,
++                                                   false);
+                     if (ret) {
+                         d->lastExportLocation = newFilePath;
+                         d->lastExportedFormat = outputFormat;
+                     }
+                 }
+ 
+-            }   // if (wantToSave)  {
++            } // if (wantToSave)  {
+             else
+                 ret = false;
+-        }   // if (bOk) {
++        } // if (bOk) {
+         else
+             ret = false;
+     } else { // saving
+@@ -1885,7 +1903,12 @@
+ 
+ void KisMainWindow::slotFileOpenRecent(const QUrl &url)
+ {
++#ifdef Q_OS_WASM
++    extern bool kritaWasmOpenCachedDocument(KisMainWindow *, const QString &, bool);
++    (void)kritaWasmOpenCachedDocument(this, url.toLocalFile(), false);
++#else
+     (void) openDocument(url.toLocalFile(), None);
++#endif
+ }
+ 
+ void KisMainWindow::slotFileSave()
+diff --git a/libs/ui/KisViewManager.cpp b/libs/ui/KisViewManager.cpp
+--- a/libs/ui/KisViewManager.cpp
++++ b/libs/ui/KisViewManager.cpp
+@@ -972,12 +972,19 @@
+     d->saveIncrementalBackup->setEnabled(true);
+ }
+ 
+-QString KisViewManager::canonicalPath()
+-{
++QString KisViewManager::canonicalPath() {
++#ifdef Q_OS_WASM
++    extern QString kritaWasmCachePath(const QString &);
++    const auto browserPath = kritaWasmCachePath(document()->localFilePath());
++    if (!browserPath.isEmpty()) {
++        extern QString kritaWasmStoragePath(const QString &);
++        return QFileInfo(kritaWasmStoragePath(browserPath)).absolutePath();
++    }
++#endif
+ #ifdef Q_OS_ANDROID
+     QString path = QFileInfo(document()->localFilePath()).canonicalPath();
+-    // if the path is based on a document tree then a directory would be returned. So check if it exists and more
+-    // importantly check if we have permissions
++    // if the path is based on a document tree then a directory would be returned. So check if it
++    // exists and more importantly check if we have permissions
+     if (QDir(path).exists()) {
+         return path;
+     } else {
+@@ -1069,18 +1076,37 @@
+     }
+     QString newFilePath = path + '/' + fileName;
+     document()->setFileBatchMode(true);
++#ifdef Q_OS_WASM
++    const QUrl previous = QUrl::fromLocalFile(document()->path());
++    const bool saved = document()->saveAs(newFilePath, document()->mimeType(), true);
++    document()->setFileBatchMode(false);
++    if (saved) {
++        extern QString kritaWasmCachePath(const QString &);
++        const auto logicalPath = kritaWasmCachePath(newFilePath);
++        KisPart::instance()->addRecentURLToAllMainWindows(
++            QUrl::fromLocalFile(logicalPath.isEmpty() ? newFilePath : logicalPath),
++            previous);
++    }
++#else
+     document()->saveAs(newFilePath, document()->mimeType(), true);
+     document()->setFileBatchMode(false);
+-    KisPart::instance()->queueAddRecentURLToAllMainWindowsOnFileSaved(QUrl::fromLocalFile(newFilePath),
+-                                                                      QUrl::fromLocalFile(document()->path()));
++    KisPart::instance()->queueAddRecentURLToAllMainWindowsOnFileSaved(
++        QUrl::fromLocalFile(newFilePath), QUrl::fromLocalFile(document()->path()));
++#endif
+ }
+ 
+ void KisViewManager::slotSaveIncrementalBackup()
+ {
+-    if (!document()) return;
+-
+-    if (document()->path().isEmpty()) {
+-        KisMainWindow *mw = qobject_cast<KisMainWindow*>(d->mainWindow);
++    if (!document())
++        return;
++
++    bool firstSave = document()->path().isEmpty();
++#ifdef Q_OS_WASM
++    extern QString kritaWasmCachePath(const QString &);
++    firstSave = firstSave || kritaWasmCachePath(document()->localFilePath()).isEmpty();
++#endif
++    if (firstSave) {
++        KisMainWindow *mw = qobject_cast<KisMainWindow *>(d->mainWindow);
+         mw->saveDocument(document(), true, false);
+         return;
+     }
+diff --git a/plugins/impex/kra/kra_export.cpp b/plugins/impex/kra/kra_export.cpp
+index b951cac..ef610d2 100644
+--- a/plugins/impex/kra/kra_export.cpp
++++ b/plugins/impex/kra/kra_export.cpp
+@@ -45,7 +45,8 @@ KisImportExportErrorCode KraExport::convert(KisDocument *document, QIODevice *io
+     KIS_ASSERT_RECOVER_RETURN_VALUE(image, ImportExportCodes::InternalError);
+ 
+     KraConverter kraConverter(document, updater());
+-    KisImportExportErrorCode res = kraConverter.buildFile(io, filename(), !document->isAutosaving());
++    KisImportExportErrorCode res =
++        kraConverter.buildFile(io, realFilename(), !document->isAutosaving());
+     dbgFile << "KraExport::convert result =" << res;
+     return res;
+ }
+diff --git a/plugins/impex/qml/qml_converter.cc b/plugins/impex/qml/qml_converter.cc
+index 755615b..eb69b33 100644
+--- a/plugins/impex/qml/qml_converter.cc
++++ b/plugins/impex/qml/qml_converter.cc
+@@ -37,7 +37,7 @@ KisImportExportErrorCode QMLConverter::buildFile(const QString &filename, const
+     QFileInfo infoRealFile(realFilename);
+     KisNodeSP node = image->rootLayer()->firstChild();
+     QString imageDir = infoRealFile.completeBaseName() + "_images";
+-    QString imagePath = infoRealFile.absolutePath() + '/' + imageDir;
++    QString imagePath = info.absolutePath() + '/' + imageDir;
+     if (node) {
+         QDir dir;
+         bool success = dir.mkpath(imagePath);
+diff --git a/plugins/impex/krz/krz_export.cpp b/plugins/impex/krz/krz_export.cpp
+index c6f29a3..b9196e8 100644
+--- a/plugins/impex/krz/krz_export.cpp
++++ b/plugins/impex/krz/krz_export.cpp
+@@ -49,7 +49,7 @@ KisImportExportErrorCode KrzExport::convert(KisDocument *document, QIODevice *io
+     bool compress = cfg.compressKra();
+     cfg.setCompressKra(true);
+     KraConverter krzConverter(document, updater());
+-    KisImportExportErrorCode res = krzConverter.buildFile(io, filename(), false);
++    KisImportExportErrorCode res = krzConverter.buildFile(io, realFilename(), false);
+     cfg.setCompressKra(compress);
+     dbgFile << "KrzExport::convert result =" << res;
+     return res;
+diff --git a/libs/ui/kis_layer_manager.cc b/libs/ui/kis_layer_manager.cc
+--- a/libs/ui/kis_layer_manager.cc
++++ b/libs/ui/kis_layer_manager.cc
+@@ -8,6 +8,8 @@
+ #include "kis_layer_manager.h"
+ 
+ #include <QRect>
++#include <QDir>
++#include <KoFileDialog.h>
+ #include <QApplication>
+ #include <QCursor>
+ #include <QString>
+@@ -549,6 +551,15 @@
+ 
+     QStringList listMimeFilter = KisImportExportManager::supportedMimeTypes(KisImportExportManager::Export);
+ 
++#ifdef Q_OS_WASM
++    KoFileDialog dialog(m_view->mainWindow(), KoFileDialog::SaveFile, QStringLiteral("SaveLayerAsFile"));
++    dialog.setCaption(i18n("Save layers to..."));
++    const QString filename = QFileInfo(QFileInfo(m_view->document()->path()).completeBaseName()
++                                      + QLatin1Char('_') + source->name() + QStringLiteral(".png")).fileName();
++    dialog.setDefaultDir(QDir(QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR"))).filePath(filename), true);
++    dialog.setMimeTypeFilters(listMimeFilter);
++    const QString path = dialog.filename();
++#else
+     KoDialog dlg;
+     QWidget *page = new QWidget(&dlg);
+     dlg.setMainWidget(page);
+@@ -576,6 +587,7 @@
+     if (!dlg.exec()) return;
+ 
+     QString path = urlRequester->fileName();
++#endif
+ 
+     if (path.isEmpty()) return;
+ 
+diff --git a/libs/ui/KisWelcomePageWidget.cpp b/libs/ui/KisWelcomePageWidget.cpp
+--- a/libs/ui/KisWelcomePageWidget.cpp
++++ b/libs/ui/KisWelcomePageWidget.cpp
+@@ -637,7 +637,11 @@
+ void KisWelcomePageWidget::recentDocumentClicked(QModelIndex index)
+ {
+     QString fileUrl = index.data(Qt::ToolTipRole).toString();
++#ifdef Q_OS_WASM
++    m_mainWindow->slotFileOpenRecent(QUrl::fromLocalFile(fileUrl));
++#else
+     m_mainWindow->openDocument(fileUrl, KisMainWindow::None );
++#endif
+ }
+ 
+ void KisWelcomePageWidget::slotRecentDocContextMenuRequest(const QPoint &pos)
+diff --git a/libs/ui/KisDocument.h b/libs/ui/KisDocument.h
+--- a/libs/ui/KisDocument.h
++++ b/libs/ui/KisDocument.h
+@@ -142,14 +142,21 @@
+      */
+     bool exportDocument(const QString &path, const QByteArray &mimeType,bool isAdvancedExporting = false, bool showWarnings = false, KisPropertiesConfigurationSP exportConfiguration = 0);
+     /**
+-     * Exports he document is a synchronous way. The caller must ensure that the
+-     * image is not accessed by any other actors, because the exporting happens
+-     * without holding the image lock.
+-     */
+-    bool exportDocumentSync(const QString &path, const QByteArray &mimeType, KisPropertiesConfigurationSP exportConfiguration = 0);
++     * Exports the document synchronously. The caller must ensure the image is not
++     * accessed by other actors, because the export runs without the image lock.
++     * Browser callers mark internal recovery/resource exports as temporary to
++     * keep them on their original path without a permanent cache copy.
++     * User exports use the acknowledged browser-cache transaction by default.
++     */
++    bool exportDocumentSync(const QString &path,
++                            const QByteArray &mimeType,
++                            KisPropertiesConfigurationSP exportConfiguration = 0,
++                            bool temporary = false);
+ 
+ private:
+-    bool exportDocumentImpl(const KritaUtils::ExportFileJob &job, KisPropertiesConfigurationSP exportConfiguration, bool isAdvancedExporting= false);
++    bool exportDocumentImpl(const KritaUtils::ExportFileJob &job,
++                            KisPropertiesConfigurationSP exportConfiguration,
++                            bool isAdvancedExporting = false);
+ 
+ public:
+     /**
+diff --git a/libs/ui/KisTemplateCreateDia.cpp b/libs/ui/KisTemplateCreateDia.cpp
+--- a/libs/ui/KisTemplateCreateDia.cpp
++++ b/libs/ui/KisTemplateCreateDia.cpp
+@@ -195,7 +195,7 @@
+         fileName = tempFile.fileName();
+     }
+ 
+-    bool retval = document->exportDocumentSync(fileName, KisDocument::nativeFormatMimeType());
++    bool retval = document->exportDocumentSync(fileName, KisDocument::nativeFormatMimeType(), {}, true);
+     if (!retval) {
+         qWarning("Could not save template");
+         return;
+diff --git a/libs/ui/KisAsyncAnimationFramesSavingRenderer.cpp b/libs/ui/KisAsyncAnimationFramesSavingRenderer.cpp
+--- a/libs/ui/KisAsyncAnimationFramesSavingRenderer.cpp
++++ b/libs/ui/KisAsyncAnimationFramesSavingRenderer.cpp
+@@ -15,6 +15,11 @@
+ #include "kis_paint_layer.h"
+ 
+ #include <kis_debug.h>
++
++#ifdef Q_OS_WASM
++#include <QFileInfo>
++#include <QTemporaryDir>
++#endif
+ 
+ #ifdef Q_OS_ANDROID
+ #include <KisAndroidUtils.h>
+@@ -123,6 +128,16 @@
+                 QString copyErrorMessage;
+ #ifdef Q_OS_ANDROID
+                 copyOk = KisAndroidUtils::copyFile(filename, identicalFrameName, &copyErrorMessage);
++#elif defined(Q_OS_WASM)
++                QTemporaryDir staging;
++                const QString staged = staging.filePath(QFileInfo(identicalFrameName).fileName());
++                extern bool kritaWasmCommitSavedFile(KisDocument *, const QString &, const QString &, bool, bool);
++                copyOk = staging.isValid() && QFile::copy(filename, staged)
++                    && kritaWasmCommitSavedFile(m_d->savingDoc.data(), identicalFrameName, staged, true, false);
++                if (!copyOk) {
++                    KisImportExportErrorCode error = ImportExportCodes::ErrorWhileWriting;
++                    copyErrorMessage = error.errorMessage();
++                }
+ #else
+                 QFile sourceFile(filename);
+                 if (sourceFile.copy(identicalFrameName)) {
+diff --git a/libs/ui/kis_file_layer.cpp b/libs/ui/kis_file_layer.cpp
+--- a/libs/ui/kis_file_layer.cpp
++++ b/libs/ui/kis_file_layer.cpp
+@@ -174,7 +174,11 @@
+     }
+     else {
+ #ifndef Q_OS_ANDROID
++#ifdef Q_OS_WASM
++        return QDir::cleanPath(QDir(m_basePath).filePath(m_filename));
++#else
+         return QDir(m_basePath).filePath(QDir::cleanPath(m_filename));
++#endif
+ #else
+         return m_filename;
+ #endif
+diff --git a/plugins/impex/libkra/kis_kra_loader.cpp b/plugins/impex/libkra/kis_kra_loader.cpp
+--- a/plugins/impex/libkra/kis_kra_loader.cpp
++++ b/plugins/impex/libkra/kis_kra_loader.cpp
+@@ -1134,6 +1134,26 @@
+ #else
+     QString fullPath = filename;
+ #endif
++#ifdef Q_OS_WASM
++    fullPath = QDir::cleanPath(fullPath);
++    extern QString kritaWasmResolveRecoverySource(const QString &, const QString &);
++    const QString recoverySource =
++        kritaWasmResolveRecoverySource(documentPath, element.attribute("wasm-recovery-source"));
++    if (!recoverySource.isEmpty()) {
++        fullPath = recoverySource;
++        filename = fullPath;
++    }
++    extern QString kritaWasmUploadedFilePath(const QString &);
++    extern QString kritaWasmCachePath(const QString &);
++    const QString uploadedSource = kritaWasmUploadedFilePath(element.attribute("wasm-source"));
++    if (!uploadedSource.isEmpty()) {
++        const QString sibling = QDir(basePath).filePath(QFileInfo(filename).fileName());
++        const bool deviceInput = !kritaWasmUploadedFilePath(documentPath).isEmpty() &&
++                                 kritaWasmCachePath(documentPath).isEmpty();
++        fullPath = deviceInput && QFileInfo(sibling).isFile() ? sibling : uploadedSource;
++        filename = fullPath;
++    }
++#endif
+     if (!QFileInfo(fullPath).exists()) {
+         KisCursorOverrideHijacker cursorHijacker;
+ 
+diff --git a/plugins/impex/libkra/kis_kra_savexml_visitor.cpp b/plugins/impex/libkra/kis_kra_savexml_visitor.cpp
+--- a/plugins/impex/libkra/kis_kra_savexml_visitor.cpp
++++ b/plugins/impex/libkra/kis_kra_savexml_visitor.cpp
+@@ -85,7 +85,20 @@
+ 
+         QDir d(QFileInfo(m_url).absolutePath());
+ 
+-#ifndef Q_OS_ANDROID
++#ifdef Q_OS_WASM
++        extern QString kritaWasmUploadedFilePath(const QString &);
++        const QString uploadedSource = kritaWasmUploadedFilePath(path);
++        if (!uploadedSource.isEmpty()) {
++            layerElement.setAttribute("source", QFileInfo(path).fileName());
++            layerElement.setAttribute("wasm-source", uploadedSource);
++        } else {
++            layerElement.setAttribute("source", d.relativeFilePath(path));
++            extern QString kritaWasmEncodeRecoverySource(const QString &, const QString &);
++            const QString recoverySource = kritaWasmEncodeRecoverySource(m_url, path);
++            if (!recoverySource.isEmpty())
++                layerElement.setAttribute("wasm-recovery-source", recoverySource);
++        }
++#elif !defined(Q_OS_ANDROID)
+         layerElement.setAttribute("source", d.relativeFilePath(path));
+ #else
+         layerElement.setAttribute("source", path);
+diff --git a/libs/ui/dialogs/KisAsyncAnimationFramesSaveDialog.cpp b/libs/ui/dialogs/KisAsyncAnimationFramesSaveDialog.cpp
+--- a/libs/ui/dialogs/KisAsyncAnimationFramesSaveDialog.cpp
++++ b/libs/ui/dialogs/KisAsyncAnimationFramesSaveDialog.cpp
+@@ -138,6 +138,11 @@
+         }
+     }
+ 
++#ifdef Q_OS_WASM
++    extern bool kritaWasmRemoveAnimationFrames(const QDir &, const QStringList &);
++    if (!kritaWasmRemoveAnimationFrames(dir, preexistingFileNames))
++        return RenderFailed;
++#else
+     // Remove any preexisting files.
+     Q_FOREACH (const QString &file, preexistingFileNames) {
+         if (!dir.remove(file)) {
+@@ -154,6 +159,8 @@
+         }
+     }
+ 
++#endif
++
+     // Save new frame files.
+     KisAsyncAnimationRenderDialogBase::Result renderingResult = KisAsyncAnimationRenderDialogBase::regenerateRange(viewManager);
+ 
+@@ -162,11 +169,16 @@
+     // to keep the next render from having artifacts.
+     preexistingFileNames = savedFiles();
+     if (renderingResult != RenderComplete) {
++#ifdef Q_OS_WASM
++        if (!kritaWasmRemoveAnimationFrames(dir, preexistingFileNames))
++            return RenderFailed;
++#else
+         Q_FOREACH (const QString &file, preexistingFileNames) {
+             if (dir.exists(file)) {
+                 (void)dir.remove(file);
+             }
+         }
++#endif
+     }
+ 
+     return renderingResult;

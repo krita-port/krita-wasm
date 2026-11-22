@@ -3,9 +3,13 @@ import { bindFileUpload } from './file-upload.ts'
 // The archive is standard gzip + USTAR, produced by scripts/package-krita.py.
 interface BundleConfig { schema: number, mode: 'auto' | 'manual', filename: string, cache_version?: string, release_url: string | null }
 interface CachedRuntime { id: string, files: Record<string, number>, version: string | null }
-export interface Bundle { base: URL, resourceBytes: number }
+export interface Bundle { base: URL, resourceBytes: number, ready: () => Promise<void>, cancel: () => Promise<void> }
 
 const decoder = new TextDecoder('utf-8', { fatal: true })
+function isSupportedRuntime(runtime: { jspi?: unknown, cxx_exceptions?: unknown, startup_event?: unknown, file_dialog?: unknown } | null | undefined) {
+  return runtime?.jspi === true && runtime.cxx_exceptions === 'wasm-native'
+    && runtime.startup_event === 'krita-ready' && runtime.file_dialog === 'linked-batch'
+}
 const runtimeNames = [
   'COPYING',
   'i18n.json',
@@ -45,7 +49,8 @@ export async function readTar(stream: ReadableStream<Uint8Array>, consume: (name
       throw new Error('Invalid archive number.')
     return Number.parseInt(trimmed, 8)
   }
-  const seen = new Set()
+  const seen = new Set<string>()
+  const directories = new Set<string>()
   try {
     while (true) {
       const header = await read(512)
@@ -77,6 +82,14 @@ export async function readTar(stream: ReadableStream<Uint8Array>, consume: (name
         : '') + text(header, 0, 100)
       if (!name || name.includes('\\') || name.split('/').some(part => !part || part === '.' || part === '..') || seen.has(name))
         throw new Error('Invalid or duplicate archive path.')
+      if (directories.has(name))
+        throw new Error('Archive file and directory conflict.')
+      for (let slash = name.indexOf('/'); slash !== -1; slash = name.indexOf('/', slash + 1)) {
+        const directory = name.slice(0, slash)
+        if (seen.has(directory))
+          throw new Error('Archive file and directory conflict.')
+        directories.add(directory)
+      }
       if (![0, 48].includes(header[156]))
         throw new Error('Only regular runtime files are supported.')
       const size = octal(text(header, 124, 12))
@@ -122,8 +135,54 @@ export async function prepareBundle(status: HTMLElement, t: (key: string) => str
     || (config.mode === 'auto' && typeof config.cache_version !== 'string')) {
     throw new Error('Invalid runtime bundle configuration.')
   }
-  const cache = await caches.open(`krita-runtime-v2:${scope.href}`)
+  const cacheName = `krita-runtime-v2:${scope.href}`
+  const cache = await caches.open(cacheName)
   const activeURL = new URL('.runtime/active.json', scope)
+  const activeLock = `${cacheName}:active`
+  const pins = new Map<string, () => void>()
+  const pin = (id: string) => new Promise<void>((resolve, reject) => {
+    if (pins.has(id)) {
+      resolve()
+      return
+    }
+    navigator.locks.request(`${cacheName}:${id}`, { mode: 'shared' }, () => new Promise<void>((release) => {
+      pins.set(id, release)
+      resolve()
+    })).catch(reject)
+  })
+  const unpin = (id: string) => {
+    pins.get(id)?.()
+    pins.delete(id)
+  }
+  const removeGeneration = async (id: string) => {
+    const base = new URL(`.runtime/${id}/`, scope)
+    for (const request of await cache.keys()) {
+      if (request.url.startsWith(base.href))
+        await cache.delete(request)
+    }
+  }
+  const prune = async () => {
+    const generations = new Map<string, Request[]>()
+    for (const request of await cache.keys()) {
+      const relative = request.url.slice(new URL('.runtime/', scope).href.length)
+      const id = relative.split('/')[0]
+      if (!request.url.startsWith(new URL('.runtime/', scope).href) || !/^[a-f0-9]{32}$/.test(id))
+        continue
+      const entries = generations.get(id) || []
+      entries.push(request)
+      generations.set(id, entries)
+    }
+    for (const [id, entries] of generations) {
+      await navigator.locks.request(`${cacheName}:${id}`, { ifAvailable: true }, async (lock) => {
+        if (!lock)
+          return
+        const published = await cache.match(activeURL)
+        if ((await published?.json().catch(() => null))?.id === id)
+          return
+        await Promise.all(entries.map(request => cache.delete(request)))
+      })
+    }
+  }
   const complete = async () => {
     const active = await cache.match(activeURL)
     if (!active)
@@ -140,26 +199,66 @@ export async function prepareBundle(status: HTMLElement, t: (key: string) => str
       || (config.mode === 'auto' && state.version !== config.cache_version)) {
       return null
     }
+    await pin(state.id)
     const base = new URL(`.runtime/${state.id}/`, scope)
-    for (const name of runtimeNames) {
-      const item = await cache.match(new URL(name, base))
-      if (!item || Number(item.headers.get('Content-Length')) !== state.files[name])
+    try {
+      for (const name of runtimeNames) {
+        const item = await cache.match(new URL(name, base))
+        if (!item || state.files[name] <= 0 || Number(item.headers.get('Content-Length')) !== state.files[name]) {
+          unpin(state.id)
+          return null
+        }
+      }
+      const runtime = await (await cache.match(new URL('runtime.json', base)))?.json().catch(() => null)
+      if (!isSupportedRuntime(runtime)) {
+        unpin(state.id)
         return null
+      }
+      return state
     }
-    return state
+    catch (error) {
+      unpin(state.id)
+      throw error
+    }
   }
-  const install = async (blob: Blob) => {
+  const unpack = async (blob: Blob, consume: (name: string, data: Uint8Array<ArrayBuffer>) => Promise<void>) => {
+    let count = 0
+    await readTar(blob.stream().pipeThrough(new DecompressionStream('gzip')), async (name, data) => {
+      if (!runtimeNames.includes(name) || !data.length)
+        throw new Error('Unexpected or empty runtime bundle file.')
+      if (name === 'krita.wasm' && !WebAssembly.validate(data))
+        throw new Error('Invalid WebAssembly module.')
+      if (name === 'i18n.json') {
+        const index = JSON.parse(decoder.decode(data))
+        if (!index || !Array.isArray(index.languages) || !index.languages.length
+          || index.languages.some((language: unknown) => typeof language !== 'string' || !language)) {
+          throw new Error('Invalid runtime language index.')
+        }
+      }
+      if (name === 'runtime.json') {
+        const runtime = JSON.parse(decoder.decode(data))
+        if (!isSupportedRuntime(runtime))
+          throw new Error('Invalid runtime configuration.')
+      }
+      if (name === 'resources.tar')
+        await readResources(new Blob([data]).stream(), () => {}, data.length)
+      count++
+      await consume(name, data)
+    }, 0x7FFFFFFF)
+    if (count !== runtimeNames.length)
+      throw new Error('Runtime bundle is missing files.')
+  }
+  const install = async (blob: Blob, retry = true): Promise<CachedRuntime> => {
     status.textContent = t('loading')
     const state: CachedRuntime = {
       id: crypto.randomUUID().replaceAll('-', ''),
       files: {},
       version: config.cache_version ?? null,
     }
+    await pin(state.id)
     const base = new URL(`.runtime/${state.id}/`, scope)
     try {
-      await readTar(blob.stream().pipeThrough(new DecompressionStream('gzip')), async (name, data) => {
-        if (!runtimeNames.includes(name))
-          throw new Error('Unexpected runtime bundle file.')
+      await unpack(blob, async (name, data) => {
         const type = name.endsWith('.js')
           ? 'text/javascript'
           : name.endsWith('.wasm')
@@ -172,26 +271,63 @@ export async function prepareBundle(status: HTMLElement, t: (key: string) => str
           },
         }))
         state.files[name] = data.length
-      }, 0x7FFFFFFF)
-      if (Object.keys(state.files).length !== runtimeNames.length)
-        throw new Error('Runtime bundle is missing files.')
-      // Publish the selected runtime only after all archive/cache writes pass.
-      await cache.put(activeURL, new Response(JSON.stringify(state)))
+      })
+      // Keep the candidate private until the real Krita window starts.
       return state
     }
     catch (failure) {
-      await Promise.all(Object.keys(state.files).map(name => cache.delete(new URL(name, base))))
+      unpin(state.id)
+      await removeGeneration(state.id)
+      if (retry && failure instanceof DOMException && failure.name === 'QuotaExceededError') {
+        // Validate the complete user-supplied replacement before making room.
+        // Never delete IndexedDB documents or a generation held by another tab.
+        await unpack(blob, async () => {})
+        const previous = await cache.match(activeURL)
+        const id = (await previous?.json().catch(() => null))?.id
+        if (typeof id === 'string' && /^[a-f0-9]{32}$/.test(id)) {
+          const removed = await navigator.locks.request(`${cacheName}:${id}`, { ifAvailable: true }, async (lock) => {
+            if (!lock)
+              return false
+            return navigator.locks.request(activeLock, async () => {
+              if ((await (await cache.match(activeURL))?.json())?.id !== id)
+                return false
+              // eslint-disable-next-line no-alert -- Freeing the only cached runtime needs an explicit choice.
+              if (!window.confirm(t('clearRuntimeCache')))
+                return false
+              await cache.delete(activeURL)
+              await removeGeneration(id)
+              return true
+            })
+          })
+          if (removed)
+            return install(blob, false)
+        }
+      }
       throw failure
     }
   }
-  let state = await complete()
+  const choose = config.mode === 'manual' && new URL(location.href).searchParams.get('bundle') === 'choose'
+  let candidate = false
+  let cancelled = false
+  let state = choose
+    ? null
+    : await complete()
+  await prune()
+  // Another tab may publish while an obsolete generation is being collected.
+  if (!choose)
+    state ||= await complete()
   if (!state) {
     if (config.mode === 'auto') {
       status.textContent = t('loading')
       const download = await fetch(new URL(config.filename, scope))
       if (!download.ok)
         throw new Error(`Runtime bundle: HTTP ${download.status}`)
-      state = await install(await download.blob())
+      const blob = await download.blob()
+      const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('')
+      if (digest !== config.cache_version)
+        throw new Error('Runtime bundle does not match its configuration; reload to retry.')
+      state = await install(blob)
+      candidate = true
     }
     else {
       const panel = document.querySelector<HTMLElement>('#bundle-panel')!
@@ -200,10 +336,11 @@ export async function prepareBundle(status: HTMLElement, t: (key: string) => str
       const error = document.querySelector<HTMLElement>('#bundle-error')!
       const link = document.querySelector<HTMLAnchorElement>('#bundle-release')!
       const url = releaseLink(config, scope)
-      if (url) {
-        const target = new URL(url)
-        if (target.protocol !== 'https:' && target.origin !== scope.origin)
-          throw new Error('Release links require HTTPS.')
+      const target = url && URL.canParse(url, scope)
+        ? new URL(url, scope)
+        : null
+      // A malformed optional download link must not disable local import.
+      if (target && (target.protocol === 'https:' || target.origin === scope.origin)) {
         link.href = target.href
         if (target.origin === scope.origin) {
           link.download = config.filename
@@ -219,9 +356,13 @@ export async function prepareBundle(status: HTMLElement, t: (key: string) => str
       panel.hidden = false
       status.textContent = t('openDevice')
       state = await new Promise<CachedRuntime>((resolve) => {
-        const release = bindFileUpload(input, drop, async (file) => {
+        const release = bindFileUpload(input, drop, async ([file]) => {
           error.textContent = ''
           const selected = await install(file)
+          candidate = true
+          const url = new URL(location.href)
+          url.searchParams.delete('bundle')
+          history.replaceState(null, '', url)
           panel.hidden = true
           release()
           resolve(selected)
@@ -245,22 +386,42 @@ export async function prepareBundle(status: HTMLElement, t: (key: string) => str
       // eslint-disable-next-line no-alert -- Replacing a runtime must explicitly confirm loss of unsaved work.
       if (!window.confirm(t('changeWarning')))
         return
-      await cache.delete(activeURL)
-      location.reload()
+      // Choosing a replacement is local to this tab until installation
+      // publishes it. Other tabs retain the current saved selection.
+      const url = new URL(location.href)
+      url.searchParams.set('bundle', 'choose')
+      location.assign(url.href)
     })
   }
   return {
     base: new URL(`.runtime/${state.id}/`, scope),
     resourceBytes: state.files['resources.tar'],
+    async ready() {
+      await navigator.locks.request(activeLock, async () => {
+        if (cancelled)
+          throw new Error('Runtime startup was cancelled.')
+        if (candidate) {
+          await cache.put(activeURL, new Response(JSON.stringify(state)))
+          candidate = false
+        }
+      })
+      await prune().catch(error => console.warn('Unused runtime cache cleanup failed', error))
+    },
+    async cancel() {
+      await navigator.locks.request(activeLock, async () => {
+        cancelled = true
+        unpin(state.id)
+        if (!candidate)
+          return
+        candidate = false
+        await removeGeneration(state.id)
+      })
+    },
   }
 }
 
-export async function loadBundleResources(bundle: Bundle) {
-  const response = await fetch(new URL('resources.tar', bundle.base))
-  if (!response.ok)
-    throw new Error(`Packed resources: HTTP ${response.status}`)
-  const resources: { destination: string, data: Uint8Array<ArrayBuffer> }[] = []
-  await readTar(response.body!, (name, data) => {
+async function readResources(stream: ReadableStream<Uint8Array>, consume: (name: string, data: Uint8Array<ArrayBuffer>) => unknown, bytes: number) {
+  await readTar(stream, (name, data) => {
     if (![
       'krita/',
       'fonts/',
@@ -269,6 +430,16 @@ export async function loadBundleResources(bundle: Bundle) {
     ].some(prefix => name.startsWith(prefix))) {
       throw new Error('Unexpected resource destination.')
     }
+    return consume(name, data)
+  }, bytes)
+}
+
+export async function loadBundleResources(bundle: Bundle) {
+  const response = await fetch(new URL('resources.tar', bundle.base))
+  if (!response.ok)
+    throw new Error(`Packed resources: HTTP ${response.status}`)
+  const resources: { destination: string, data: Uint8Array<ArrayBuffer> }[] = []
+  await readResources(response.body!, (name, data) => {
     resources.push({ destination: `/${name}`, data })
   }, bundle.resourceBytes)
   return resources

@@ -27,5 +27,6 @@
   "error": "Hiba",
   "details": "Részletek",
   "preparing": "Betöltés…",
-  "starting": "Betöltés…"
+  "starting": "Betöltés…",
+  "clearRuntimeCache": "Eltávolítja a gyorsítótárazott csomagot, és újrapróbálja? Ha a betöltés sikertelen, válasszon újra egy csomagot. A mentett rajzok megmaradnak."
 }
