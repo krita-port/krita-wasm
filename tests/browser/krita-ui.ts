@@ -180,13 +180,21 @@ class KritaUI {
     }
   }
 
-  async chooseDeviceFile(path: string | string[], method: 'picker' | 'drop' = 'picker') {
+  async chooseDeviceFile(path: string | string[], method: 'input' | 'picker' | 'drop' = 'input') {
     const dialog = this.page.locator('#file-open')
     await expect(dialog).toBeVisible()
-    if (method === 'picker') {
-      const input = this.page.locator('#device-file')
+    const input = this.page.locator('#device-file')
+    if (method === 'input') {
       await expect(input).toBeEnabled()
       await input.setInputFiles(path)
+    }
+    else if (method === 'picker') {
+      await expect(input).toBeEnabled()
+      const [chooser] = await Promise.all([
+        this.page.waitForEvent('filechooser'),
+        this.page.locator('#device-choose').click(),
+      ])
+      await chooser.setFiles(path)
     }
     else {
       const paths = Array.isArray(path)
