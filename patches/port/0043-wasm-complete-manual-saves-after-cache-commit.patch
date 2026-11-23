@@ -17,8 +17,8 @@ canonical browser paths for incremental saves.
 Related desktop save-failure reports (not IDBFS):
 https://bugs.kde.org/show_bug.cgi?id=506760
 https://bugs.kde.org/show_bug.cgi?id=522480
-Keep the existing exporter physical/logical path separation: KRA and KRZ links use the
-logical filename, while QML companion images use the physical output directory.
+For Wasm export staging, KRA and KRZ links use the logical filename, while
+QML companion images use the physical output directory.
 Commit every regular output produced by the exporter, not only the main file.
 Upstream issue searches for browser staging, relative file-layer paths and
 multi-file export commits found no matching report.
@@ -614,7 +614,7 @@ index 09d250e..4cd3d85 100644
          }
  
          if (exportConfiguration && !batchMode()) {
-@@ -752,10 +770,10 @@ KisImportExportErrorCode KisImportExportManager::doImport(const QString &locatio
+@@ -752,10 +770,13 @@ KisImportExportErrorCode KisImportExportManager::doImport(const QString &locatio
  KisImportExportErrorCode KisImportExportManager::doExport(const QString &location,
                                                            QSharedPointer<KisImportExportFilter> filter,
                                                            KisPropertiesConfigurationSP exportConfiguration,
@@ -624,15 +624,20 @@ index 09d250e..4cd3d85 100644
  {
 -    KisImportExportErrorCode status =
 -            doExportImpl(location, filter, exportConfiguration);
++#ifndef Q_OS_WASM
++    Q_UNUSED(alsoAsKraRealLocation);
++#endif
 +    KisImportExportErrorCode status = doExportImpl(location, filter, exportConfiguration);
  
      if (!alsoAsKraLocation.isNull() && status.isOk()) {
          QByteArray mime = m_document->nativeFormatMimeType();
-@@ -766,9 +784,9 @@ KisImportExportErrorCode KisImportExportManager::doExport(const QString &locatio
+@@ -766,9 +787,11 @@ KisImportExportErrorCode KisImportExportManager::doExport(const QString &locatio
  
          if (filter) {
              filter->setFilename(alsoAsKraLocation);
++#ifdef Q_OS_WASM
 +            filter->setRealFilename(alsoAsKraRealLocation);
++#endif
  
 -            KisPropertiesConfigurationSP kraExportConfiguration =
 -                    filter->lastSavedConfiguration(mime, mime);
@@ -867,13 +872,16 @@ diff --git a/plugins/impex/kra/kra_export.cpp b/plugins/impex/kra/kra_export.cpp
 index b951cac..ef610d2 100644
 --- a/plugins/impex/kra/kra_export.cpp
 +++ b/plugins/impex/kra/kra_export.cpp
-@@ -45,7 +45,8 @@ KisImportExportErrorCode KraExport::convert(KisDocument *document, QIODevice *io
+@@ -45,7 +45,11 @@ KisImportExportErrorCode KraExport::convert(KisDocument *document, QIODevice *io
      KIS_ASSERT_RECOVER_RETURN_VALUE(image, ImportExportCodes::InternalError);
  
      KraConverter kraConverter(document, updater());
 -    KisImportExportErrorCode res = kraConverter.buildFile(io, filename(), !document->isAutosaving());
-+    KisImportExportErrorCode res =
-+        kraConverter.buildFile(io, realFilename(), !document->isAutosaving());
++#ifdef Q_OS_WASM
++    KisImportExportErrorCode res = kraConverter.buildFile(io, realFilename(), !document->isAutosaving());
++#else
++    KisImportExportErrorCode res = kraConverter.buildFile(io, filename(), !document->isAutosaving());
++#endif
      dbgFile << "KraExport::convert result =" << res;
      return res;
  }
@@ -881,12 +889,16 @@ diff --git a/plugins/impex/qml/qml_converter.cc b/plugins/impex/qml/qml_converte
 index 755615b..eb69b33 100644
 --- a/plugins/impex/qml/qml_converter.cc
 +++ b/plugins/impex/qml/qml_converter.cc
-@@ -37,7 +37,7 @@ KisImportExportErrorCode QMLConverter::buildFile(const QString &filename, const
+@@ -37,7 +37,11 @@ KisImportExportErrorCode QMLConverter::buildFile(const QString &filename, const
      QFileInfo infoRealFile(realFilename);
      KisNodeSP node = image->rootLayer()->firstChild();
      QString imageDir = infoRealFile.completeBaseName() + "_images";
 -    QString imagePath = infoRealFile.absolutePath() + '/' + imageDir;
++#ifdef Q_OS_WASM
 +    QString imagePath = info.absolutePath() + '/' + imageDir;
++#else
++    QString imagePath = infoRealFile.absolutePath() + '/' + imageDir;
++#endif
      if (node) {
          QDir dir;
          bool success = dir.mkpath(imagePath);
@@ -894,12 +906,16 @@ diff --git a/plugins/impex/krz/krz_export.cpp b/plugins/impex/krz/krz_export.cpp
 index c6f29a3..b9196e8 100644
 --- a/plugins/impex/krz/krz_export.cpp
 +++ b/plugins/impex/krz/krz_export.cpp
-@@ -49,7 +49,7 @@ KisImportExportErrorCode KrzExport::convert(KisDocument *document, QIODevice *io
+@@ -49,7 +49,11 @@ KisImportExportErrorCode KrzExport::convert(KisDocument *document, QIODevice *io
      bool compress = cfg.compressKra();
      cfg.setCompressKra(true);
      KraConverter krzConverter(document, updater());
 -    KisImportExportErrorCode res = krzConverter.buildFile(io, filename(), false);
++#ifdef Q_OS_WASM
 +    KisImportExportErrorCode res = krzConverter.buildFile(io, realFilename(), false);
++#else
++    KisImportExportErrorCode res = krzConverter.buildFile(io, filename(), false);
++#endif
      cfg.setCompressKra(compress);
      dbgFile << "KrzExport::convert result =" << res;
      return res;

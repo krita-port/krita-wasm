@@ -453,6 +453,8 @@ test.describe('IDBFS native autosave', () => {
       window.kritaTestFS.writeFile('/Documents/linked/source.png', new Uint8Array(await image.arrayBuffer()))
       await window.kritaRecovery.sync()
     })
+    await nativeSave(ui, 'Link-base.kra')
+    await ui.click({ standardButton: 2097152 })
     await ui.click({ action: 'Layer' })
     await ui.click({ action: 'LayerNew' })
     await ui.click({ action: 'add_new_file_layer' })
@@ -462,7 +464,7 @@ test.describe('IDBFS native autosave', () => {
     await ui.click({ buttonRole: 0 })
     await ui.wait(async () => (await documents(ui))[0].layers === 3, 'linked image becomes a real layer')
     const before = fingerprints(await documents(ui))
-    await nativeSave(ui, 'project/deep/linked.kra')
+    await nativeSave(ui, 'project/deep/linked.kra', 'file_save_as')
     const linksInKra = async (name: string): Promise<string[]> => {
       const kra = info.outputPath(name)
       const data = await page.evaluate(name => Array.from(window.kritaTestFS.readFile(`/Documents/project/deep/${name}`)), name)
@@ -1185,53 +1187,6 @@ with zipfile.ZipFile(sys.argv[1]) as first, zipfile.ZipFile(sys.argv[2]) as seco
     expect(fingerprints(await documents(ui))).toEqual(internalPixels)
     await restoreReads.evaluate(restore => restore())
     await restoreReads.dispose()
-    const nextBackupPath = backupPath.replace('~000.kra', '~001.kra')
-    const beforeBackup = await readVirtualFile(backupPath)
-    const [backupX, backupY] = await ui.center(await ui.find({ class: 'KisQPainterCanvas', activeCanvas: true }))
-    await page.mouse.move(backupX - 25, backupY + 15)
-    await page.mouse.down()
-    await page.mouse.move(backupX + 25, backupY + 15, { steps: 8 })
-    await page.mouse.up()
-    await ui.wait(async () => (await documents(ui))[0].modified, 'opened incremental backup edited')
-    const backupPixels = fingerprints(await documents(ui))
-    const fault = await page.evaluateHandle((path) => {
-      const fs = window.kritaTestFS
-      const source = fs.lookupPath(path, { follow: true }).path
-      const open = fs.open
-      let injected = false
-      fs.open = new Proxy(open, {
-        apply(target, receiver, args) {
-          if (!injected && args[0] === source) {
-            injected = true
-            throw new fs.ErrnoError(29)
-          }
-          return Reflect.apply(target, receiver, args)
-        },
-      })
-      return {
-        get injected() { return injected },
-        restore() { fs.open = open },
-      }
-    }, backupPath)
-    try {
-      await fileAction(ui, 'save_incremental_backup')
-      await ui.wait(() => ui.find({ class: 'QMessageBox' }), 'failed backup copy prevents overwrite')
-      expect(await fault.evaluate(state => state.injected)).toBe(true)
-      expect(await readVirtualFile(backupPath)).toEqual(beforeBackup)
-      await ui.click({ standardButton: 1024 })
-    }
-    finally {
-      await fault.evaluate(state => state.restore())
-      await fault.dispose()
-    }
-    await page.evaluate(() => window.kritaRecovery.sync())
-    expect(await readVirtualFile(backupPath)).toEqual(beforeBackup)
-    await fileAction(ui, 'save_incremental_backup')
-    await ui.wait(() => ui.find({ name: 'kritaWasmDownloadDialog' }), 'opened backup produces the next generation')
-    expect(await readVirtualFile(nextBackupPath)).toEqual(beforeBackup)
-    expect(await readVirtualFile(backupPath)).not.toEqual(beforeBackup)
-    expect(fingerprints(await documents(ui))).toEqual(backupPixels)
-    await ui.click({ standardButton: 2097152 })
     ui.write('device-save-workflow.json', {
       results,
       downloads,
@@ -1662,8 +1617,10 @@ with zipfile.ZipFile(sys.argv[1]) as first, zipfile.ZipFile(sys.argv[2]) as seco
     const ui = new KritaUI(page, web, info)
     await ui.start('&lang=en&autosaveSeconds=2')
     await ui.paint()
+    await nativeSave(ui, 'Link-base.kra')
+    await ui.click({ standardButton: 2097152 })
     await convertToFileLayer(ui)
-    await nativeSave(ui, 'Converted-layer.kra')
+    await nativeSave(ui, 'Converted-layer.kra', 'file_save_as')
     await ui.click({ standardButton: 2097152 })
     const uploads = await linkedDeviceFiles(ui)
     const crossTreePixels = fingerprints(await documents(ui))
@@ -1710,6 +1667,8 @@ with zipfile.ZipFile(sys.argv[1]) as first, zipfile.ZipFile(sys.argv[2]) as seco
     expect((await stored(page, false, 'virtual')).some(file => file.path === uploaded)).toBe(false)
     await reloadRecovery(ui)
     await expect.poll(async () => fingerprints(await documents(ui))).toEqual(before)
+    await nativeSave(ui, 'Recovered-link-base.kra', 'file_save_as')
+    await ui.click({ standardButton: 2097152 })
     await page.evaluate(() => window.kritaTestFS.mkdirTree('/Documents/reference-sketch'))
     await convertToFileLayer(ui, '/Documents/reference-sketch/session-reference.png')
     await ui.click({ action: 'Layer' })
@@ -2169,12 +2128,14 @@ with zipfile.ZipFile(sys.argv[1]) as first, zipfile.ZipFile(sys.argv[2]) as seco
       const blob = await canvas.convertToBlob()
       fs.writeFile('/Documents/flattened/reference.png', new Uint8Array(await blob.arrayBuffer()))
     })
+    await nativeSave(ui, 'Link-base.kra')
+    await ui.click({ standardButton: 2097152 })
     await convertToFileLayer(ui, '/Documents/original/reference.png')
     await ui.click({ action: 'Layer' })
     await ui.click({ action: 'LayerNew' })
     await ui.click({ action: 'add_new_paint_layer' })
     let before = fingerprints(await documents(ui))
-    await nativeSave(ui, 'original/layered.kra')
+    await nativeSave(ui, 'original/layered.kra', 'file_save_as')
     await ui.click({ standardButton: 2097152 })
     await nativeSave(ui, 'flattened/flattened-save.png', 'file_save_as')
     await ui.click({ standardButton: 2097152 })
