@@ -1180,6 +1180,9 @@ test.describe('Manual release bundle loader', () => {
   })
   for (const method of ['picker', 'drop']) {
     test(`download, ${method}, paint and cached reload`, async ({ page, web }, info) => {
+      // The picker scenario starts the real runtime in six separate page loads.
+      if (method === 'picker')
+        info.setTimeout(420_000)
       const previewURL = method === 'drop'
         ? `${web.previewURL}/nested`
         : web.previewURL
@@ -1221,21 +1224,29 @@ test.describe('Manual release bundle loader', () => {
       execFileSync('python3', [
         '-c',
         `
-import io,sys,tarfile
+import io
+import sys
+import tarfile
+
 conflicting = io.BytesIO()
 with tarfile.open(fileobj=conflicting, mode='w', format=tarfile.USTAR_FORMAT) as resources:
- for name in ('krita/share/item', 'krita/share/item/image.png'):
-  entry=tarfile.TarInfo(name);entry.size=1
-  resources.addfile(entry,io.BytesIO(b'x'))
-for output,member,data in [(sys.argv[2],'i18n.json',b'{broken'),(sys.argv[3],'resources.tar',conflicting.getvalue()),(sys.argv[4],'runtime.json',sys.argv[5].encode())]:
- with tarfile.open(sys.argv[1], 'r|gz') as source, tarfile.open(output, 'w|gz', format=tarfile.USTAR_FORMAT) as target:
-  for entry in source:
-   if entry.name == member:
-    entry.size=len(data);target.addfile(entry,io.BytesIO(data))
-   else:
-    target.addfile(entry,source.extractfile(entry))
+    for name in ('krita/share/item', 'krita/share/item/image.png'):
+        entry = tarfile.TarInfo(name)
+        entry.size = 1
+        resources.addfile(entry, io.BytesIO(b'x'))
+
+variants = [
+    (sys.argv[1], 'i18n.json', b'{broken'),
+    (sys.argv[2], 'resources.tar', conflicting.getvalue()),
+    (sys.argv[3], 'runtime.json', sys.argv[4].encode()),
+]
+for output, name, data in variants:
+    with tarfile.open(output, 'w:gz', format=tarfile.USTAR_FORMAT) as archive:
+        for member, contents in (('COPYING', b'test fixture'), (name, data)):
+            entry = tarfile.TarInfo(member)
+            entry.size = len(contents)
+            archive.addfile(entry, io.BytesIO(contents))
 `,
-        file,
         malformed,
         brokenResources,
         incompatible,
