@@ -184,10 +184,9 @@ class KritaUI {
     const dialog = this.page.locator('#file-open')
     await expect(dialog).toBeVisible()
     if (method === 'picker') {
-      await expect(this.page.locator('#device-file')).toBeEnabled()
-      const pending = this.page.waitForEvent('filechooser')
-      await this.page.locator('#device-choose').click()
-      await (await pending).setFiles(path)
+      const input = this.page.locator('#device-file')
+      await expect(input).toBeEnabled()
+      await input.setInputFiles(path)
     }
     else {
       const paths = Array.isArray(path)

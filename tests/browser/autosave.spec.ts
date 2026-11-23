@@ -742,8 +742,16 @@ with zipfile.ZipFile(sys.argv[1]) as first, zipfile.ZipFile(sys.argv[2]) as seco
           await uploadFault.evaluate(state => state.restore())
           await uploadFault.dispose()
         }
+        await expect(page.locator('#device-file')).toBeEnabled()
+        const [chooser] = await Promise.all([
+          page.waitForEvent('filechooser'),
+          page.locator('#device-choose').click(),
+        ])
+        await chooser.setFiles(uploads)
       }
-      await ui.chooseDeviceFile(uploads, method)
+      else {
+        await ui.chooseDeviceFile(uploads, method)
+      }
       await ui.wait(async () => (await documents(ui)).length === 2, `both ${method} images open`)
       const opened = await documents(ui)
       expect(opened.map(doc => doc.width).sort((a, b) => a - b)).toEqual([48, 80])
