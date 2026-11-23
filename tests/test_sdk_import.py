@@ -314,6 +314,24 @@ class NightlyReleaseTest(unittest.TestCase):
                             sdk_import.download(asset, destination)
                 self.assertEqual(destination.read_bytes(), winner)
 
+    def test_release_token_is_used_only_for_metadata_requests(self) -> None:
+        def open_url(request: Request, timeout: int = 60) -> io.BytesIO:
+            if request.full_url == sdk_import.RELEASE_API:
+                self.assertEqual(
+                    request.get_header("Authorization"), "Bearer test-token"
+                )
+                self.assertNotIn("Authorization", request.headers)
+            else:
+                self.assertFalse(request.has_header("Authorization"))
+            return self.open_url(request, timeout)
+
+        with (
+            patch.dict(os.environ, GITHUB_TOKEN="test-token"),
+            patch.object(sdk_import, "urlopen", side_effect=open_url),
+        ):
+            sdk_import.fetch()
+        self.assertTrue((self.root / "build/sdk-release.json").is_file())
+
     def test_missing_digest_does_not_select_a_release(self) -> None:
         self.metadata["assets"][0]["digest"] = None
         with self.assertRaisesRegex(ValueError, "no SHA256 digest"):

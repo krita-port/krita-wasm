@@ -104,6 +104,8 @@ def resolve_release() -> dict[str, Any]:
         RELEASE_API,
         headers={"Accept": "application/vnd.github+json", "User-Agent": "krita-wasm"},
     )
+    if token := os.environ.get("GITHUB_TOKEN"):
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
     with urlopen(request, timeout=60) as response:
         metadata = json.load(response)
     assets = {
