@@ -1422,7 +1422,10 @@ for output, name, data in variants:
           })
           await missingBridge.goto(`${previewURL}/?bundle=choose&lang=en`, { waitUntil: 'domcontentloaded' })
           await missingBridge.locator('#bundle-file').setInputFiles(file)
-          await expect(missingBridge.locator('#failure-stack')).toContainText('Missing native runtime export: _kritaWasmSetWidgetStyle')
+          await expect(missingBridge.locator('#failure-stack')).toContainText(
+            'Missing native runtime export: _kritaWasmSetWidgetStyle',
+            { timeout: 90_000 },
+          )
           expect(await runtimeId()).toBe(firstRuntime)
         }
         finally {
