@@ -322,11 +322,12 @@ export async function prepareBundle(status: HTMLElement, t: (key: string) => str
       const download = await fetch(new URL(config.filename, scope))
       if (!download.ok)
         throw new Error(`Runtime bundle: HTTP ${download.status}`)
-      const blob = await download.blob()
-      const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('')
+      // Chromium can refuse a downloaded Blob when the profile disk is low on space.
+      const bytes = await download.arrayBuffer()
+      const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')
       if (digest !== config.cache_version)
         throw new Error('Runtime bundle does not match its configuration; reload to retry.')
-      state = await install(blob)
+      state = await install(new Blob([bytes]))
       candidate = true
     }
     else {
