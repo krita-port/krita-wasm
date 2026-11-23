@@ -96,13 +96,13 @@ jobs:
 
       - name: Install browser runtime libraries
         run: |
+          sudo apt update
           if report=$(pnpm exec playwright install-deps --dry-run chromium firefox webkit 2>&1); then
             printf '%s\n' "$report"
           else
             printf '%s\n' "$report"
             mapfile -t packages < <(printf '%s\n' "$report" | sed -n 's/^  \([a-z0-9][a-z0-9+.-]*\)$/\1/p')
             test "${#packages[@]}" -gt 0
-            sudo apt update
             sudo apt install -y --no-install-recommends "${packages[@]}"
           fi
           pnpm exec playwright install-deps --dry-run chromium firefox webkit
