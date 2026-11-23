@@ -68,7 +68,8 @@ jobs:
 
       - name: Build and package
         run: |
-          python scripts/offline-exec.py scripts/package-krita.py --output dist/krita
+          python scripts/offline-exec.py scripts/package-krita.py --output dist/krita \
+            --release-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/latest"
 
       - name: Upload packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -120,3 +121,47 @@ jobs:
             build/catalogs.json
             build/wasm-exceptions.json
           if-no-files-found: ignore
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: krita-wasm-${{ github.sha }}
+          path: dist/krita
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          assets=(
+            dist/krita/krita.bundle.tar.gz
+            dist/krita/krita.pages.tar.gz
+            dist/krita/build.json
+          )
+          for asset in "${assets[@]}"; do
+            test -s "$asset"
+          done
+          ref=$(gh api "repos/$GH_REPO/git/matching-refs/tags/latest" \
+            --jq '.[] | select(.ref == "refs/tags/latest") | .ref')
+          if [[ -n "$ref" ]]; then
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/latest" \
+              -f "sha=$GITHUB_SHA" -F force=true
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref=refs/tags/latest -f "sha=$GITHUB_SHA"
+          fi
+          if gh release view latest > /dev/null 2>&1; then
+            gh release upload latest "${assets[@]}" --clobber
+            gh release edit latest --prerelease --latest=false --draft=false \
+              --title 'Nightly build' --notes "Built from $GITHUB_SHA."
+          else
+            gh release create latest "${assets[@]}" --verify-tag --prerelease --latest=false \
+              --title 'Nightly build' --notes "Built from $GITHUB_SHA."
+          fi
