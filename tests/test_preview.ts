@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 import process from 'node:process'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { stripVTControlCharacters } from 'node:util'
 import { Script } from 'node:vm'
 import { gzipSync } from 'node:zlib'
 import vitePackage from 'vite/package.json' with { type: 'json' }
@@ -52,7 +53,7 @@ async function startServer(t: TestContext, root: string, mode: string) {
     }, 20_000)
     const collect = (chunk: Buffer) => {
       output += chunk.toString()
-      const match = output.match(/http:\/\/127\.0\.0\.1:\d+/)
+      const match = stripVTControlCharacters(output).match(/http:\/\/127\.0\.0\.1:\d+/)
       if (match) {
         clearTimeout(timer)
         resolve(new URL(match[0]))
