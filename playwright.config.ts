@@ -5,7 +5,8 @@ export default defineConfig({
   testDir: './tests/browser',
   testMatch: ['krita.spec.ts', 'autosave.spec.ts', 'persistence-profile.spec.ts'],
   outputDir: 'build/logs/playwright',
-  timeout: 240_000,
+  // End-to-end workflows can restart the full Wasm application several times.
+  timeout: 480_000,
   expect: { timeout: 30_000 },
   workers: 3,
   retries: process.env.CI ? 3 : 0,

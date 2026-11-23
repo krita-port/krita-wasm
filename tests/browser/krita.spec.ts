@@ -1180,9 +1180,6 @@ test.describe('Manual release bundle loader', () => {
   })
   for (const method of ['picker', 'drop']) {
     test(`download, ${method}, paint and cached reload`, async ({ page, web }, info) => {
-      // The picker scenario starts the real runtime in six separate page loads.
-      if (method === 'picker')
-        info.setTimeout(420_000)
       const previewURL = method === 'drop'
         ? `${web.previewURL}/nested`
         : web.previewURL

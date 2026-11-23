@@ -699,8 +699,6 @@ with zipfile.ZipFile(sys.argv[1]) as first, zipfile.ZipFile(sys.argv[2]) as seco
   })
 
   test('device Save, Save As, Close and Close All share the durable cache workflow', async ({ page, web }, info) => {
-    // This scenario performs the full save workflow and verifies it after two reloads.
-    info.setTimeout(360_000)
     const ui = new KritaUI(page, web, info)
     await ui.start('&lang=en&autosaveSeconds=60')
     // Identical basenames must remain distinct, and closing one upload must
