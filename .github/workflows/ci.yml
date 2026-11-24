@@ -81,8 +81,15 @@ jobs:
             dist/krita/krita.bundle.tar.gz
             dist/krita/krita.pages.tar.gz
             dist/krita/build.json
+            dist/krita/COPYING
+            dist/krita/assets/
+            dist/krita/bundle.json
+            dist/krita/i18n.json
+            dist/krita/index.html
+            dist/krita/isolation-sw.js
           compression-level: 0
           if-no-files-found: error
+          overwrite: true
 
       - name: Verify distributed Wasm and frozen SDK inventories
         run: |
@@ -96,10 +103,69 @@ jobs:
         run: |
           python scripts/verify-krita-catalogs.py dist/krita/krita.bundle.tar.gz --report build/catalogs.json
 
-      - name: Install browser runtime libraries
+      - name: Upload build verification
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: krita-build-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            build/catalogs.json
+            build/wasm-exceptions.json
+          if-no-files-found: ignore
+
+  browser:
+    name: Browser (${{ matrix.browser }})
+    needs: build
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      PLAYWRIGHT_PROJECT: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.5'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --cache-dir cache/pip -r requirements.txt
+          pnpm install --frozen-lockfile --ignore-scripts --store-dir cache/pnpm
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: krita-wasm-${{ github.sha }}
+          path: dist/krita
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+
+      - name: Extract Pages loader
+        run: |
+          mkdir -p dist/krita/pages
+          tar -xzf dist/krita/krita.pages.tar.gz -C dist/krita/pages
+
+      - name: Install browser and runtime libraries
         run: |
           sudo apt update
-          if report=$(pnpm exec playwright install-deps --dry-run chromium firefox webkit 2>&1); then
+          if report=$(pnpm exec playwright install-deps --dry-run "$PLAYWRIGHT_PROJECT" 2>&1); then
             printf '%s\n' "$report"
           else
             printf '%s\n' "$report"
@@ -107,35 +173,80 @@ jobs:
             test "${#packages[@]}" -gt 0
             sudo apt install -y --no-install-recommends "${packages[@]}"
           fi
-          pnpm exec playwright install-deps --dry-run chromium firefox webkit
-          pnpm exec playwright install chromium firefox webkit
+          pnpm exec playwright install-deps --dry-run "$PLAYWRIGHT_PROJECT"
+          pnpm exec playwright install "$PLAYWRIGHT_PROJECT"
 
-      - name: Verify all three browser engines
-        run: pnpm test:browser
+      - name: Restore passing browser tests
+        id: previous-browser-results
+        if: github.run_attempt != '1'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prefix="test-result-$PLAYWRIGHT_PROJECT-"
+          previous=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" |
+            jq -sr --arg prefix "$prefix" --argjson attempt "$GITHUB_RUN_ATTEMPT" '
+              [.[].artifacts[] | select(.expired | not) | .name
+                | select(startswith($prefix)) | ltrimstr($prefix)
+                | select(test("^[1-9][0-9]*$")) | tonumber | select(. < $attempt)]
+              | max // empty')
+          if [[ -n "$previous" ]]; then
+            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name "$prefix$previous" --dir build/browser-resume/previous
+          fi
+
+      - name: Run browser tests
+        env:
+          PREVIOUS_BROWSER_RESULTS: ${{ steps.previous-browser-results.outcome }}
+          KRITA_BROWSER_RESULTS: build/browser-resume/passed.txt
+        run: |
+          mkdir -p build/browser-resume
+          previous=build/browser-resume/previous/passed.txt
+          fingerprint=$(sha256sum dist/krita/build.json)
+          header="# build ${fingerprint%% *}"
+          if [[ "$PREVIOUS_BROWSER_RESULTS" == success && -f "$previous" && "$(head -n 1 "$previous")" == "$header" ]]; then
+            cp -- "$previous" "$KRITA_BROWSER_RESULTS"
+          else
+            printf '%s\n' "$header" > "$KRITA_BROWSER_RESULTS"
+          fi
+          args=(--project "$PLAYWRIGHT_PROJECT" --add-reporter "$PWD/tests/browser/passed-tests-reporter.ts")
+          if grep -q '^\[' "$KRITA_BROWSER_RESULTS"; then
+            args+=(--test-list-invert "$KRITA_BROWSER_RESULTS")
+          fi
+          pnpm test:browser "${args[@]}"
+
+      - name: Upload passing browser tests
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-result-${{ matrix.browser }}-${{ github.run_attempt }}
+          path: build/browser-resume/passed.txt
+          if-no-files-found: ignore
 
       - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: krita-browser-evidence-${{ github.sha }}
-          path: |
-            build/logs/
-            build/catalogs.json
-            build/wasm-exceptions.json
+          name: krita-browser-evidence-${{ matrix.browser }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: build/logs/
           if-no-files-found: ignore
 
   publish:
-    needs: build
+    needs: [build, browser]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-26.04
     permissions:
       contents: write
+      actions: read
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: krita-wasm-${{ github.sha }}
           path: dist/krita
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
 
       - name: Publish nightly release
         env:
