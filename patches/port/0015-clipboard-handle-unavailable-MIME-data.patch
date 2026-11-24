@@ -1,0 +1,79 @@
+Subject: [PATCH] Treat an unavailable clipboard MIME object as empty
+
+Qt Wasm can have no clipboard MIME data during initial window creation.
+Guard format predicates and image extraction rather than dereferencing a
+null object. Keep normal clipboard content handling unchanged.
+
+diff --git a/libs/ui/kis_clipboard.cc b/libs/ui/kis_clipboard.cc
+--- a/libs/ui/kis_clipboard.cc
++++ b/libs/ui/kis_clipboard.cc
+@@ -585,8 +585,8 @@
+ {
+     if (!d->pushedClipboard) {
+         const QMimeData *cbData = d->clipboard->mimeData();
+-        d->hasClip = d->clipboard->mimeData()->hasImage()
+-                || (cbData && cbData->hasFormat("application/x-krita-selection"));
++        d->hasClip = cbData && (cbData->hasImage()
++                || cbData->hasFormat("application/x-krita-selection"));
+     }
+     d->pushedClipboard = false;
+     Q_EMIT clipChanged();
+@@ -657,7 +657,7 @@
+ 
+         return clip->exactBounds().size();
+     } else {
+-        if (d->clipboard->mimeData()->hasImage()) {
++        if (cbData && cbData->hasImage()) {
+             QImage qimage = d->clipboard->image();
+             return qimage.size();
+         }
+@@ -680,7 +680,8 @@
+ bool KisClipboard::hasLayers() const
+ {
+     const QByteArray mimeType = QByteArrayLiteral("application/x-krita-node-internal-pointer");
+-    return d->clipboard->mimeData()->hasFormat(mimeType);
++    const QMimeData *cbData = d->clipboard->mimeData();
++    return cbData && cbData->hasFormat(mimeType);
+ }
+ 
+ bool KisClipboard::hasLayerStyles() const
+@@ -689,28 +690,35 @@
+     //       result of this function, because we allow pasting
+     //       of the layer styles as 'text/plain'
+ 
+-    return d->clipboard->mimeData()->hasFormat("application/x-krita-layer-style");
++    const QMimeData *cbData = d->clipboard->mimeData();
++    return cbData && cbData->hasFormat("application/x-krita-layer-style");
+ }
+ 
+ const QMimeData *KisClipboard::layersMimeData() const
+ {
+     const QMimeData *cbData = d->clipboard->mimeData();
+-    return cbData->hasFormat("application/x-krita-node-internal-pointer") ? cbData : 0;
++    return cbData && cbData->hasFormat("application/x-krita-node-internal-pointer") ? cbData : nullptr;
+ }
+ 
+ bool KisClipboard::hasUrls() const
+ {
+-    return d->clipboard->mimeData()->hasUrls();
++    const QMimeData *cbData = d->clipboard->mimeData();
++    return cbData && cbData->hasUrls();
+ }
+ 
+ 
+ bool KisClipboard::hasImage() const
+ {
+-    return d->clipboard->mimeData()->hasImage();
++    const QMimeData *cbData = d->clipboard->mimeData();
++    return cbData && cbData->hasImage();
+ }
+ 
+ QImage KisClipboard::getImageFromMimeData(const QMimeData *cbData) const
+ {
++    if (!cbData) {
++        return {};
++    }
++
+     static const QList<ClipboardImageFormat> supportedFormats = {
+         {{"image/png"}, "PNG"},
+         {{"image/tiff"}, "TIFF"},

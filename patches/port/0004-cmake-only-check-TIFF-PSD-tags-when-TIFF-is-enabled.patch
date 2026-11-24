@@ -1,0 +1,18 @@
+Subject: [PATCH] Only check TIFF PSD tags when TIFF is enabled
+
+The top-level dependency is optional, but its probe re-ran a REQUIRED lookup.
+Keep optional-format profiles configurable without libtiff.
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1243,7 +1243,9 @@
+     URL "http://www.libtiff.org"
+     TYPE OPTIONAL
+     PURPOSE "Required by the Krita TIFF filter")
+-include(CheckLibTIFFPSDSupport)
++if(TIFF_FOUND)
++    include(CheckLibTIFFPSDSupport)
++endif()
+ configure_file(config-tiff.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-tiff.h)
+ 
+ find_package(JPEG)

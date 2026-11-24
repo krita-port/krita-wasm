@@ -1,0 +1,24 @@
+Subject: [PATCH] Preserve help action lifecycle connections when replacing its handler
+
+Only replace triggered handlers when routing the handbook action to the
+Krita manual. A blanket disconnect also removes destroyed and other
+bookkeeping connections and is diagnosed by recent Qt versions.
+
+Related upstream issue (wildcard-disconnect diagnostics and log-docker
+reentrancy): https://bugs.kde.org/show_bug.cgi?id=509947
+This changes the disconnecting caller, not the upstream log-handler fix.
+
+diff --git a/libs/ui/KisMainWindow.cpp b/libs/ui/KisMainWindow.cpp
+--- a/libs/ui/KisMainWindow.cpp
++++ b/libs/ui/KisMainWindow.cpp
+@@ -572,8 +572,8 @@
+ 
+     // KDE' libs 4''s help contents action is broken outside kde, for some reason... We can handle it just as easily ourselves
+     QAction *helpAction = actionCollection()->action("help_contents");
+-    helpAction->disconnect();
+-    connect(helpAction, SIGNAL(triggered()), this, SLOT(showManual()));
++    disconnect(helpAction, &QAction::triggered, nullptr, nullptr);
++    connect(helpAction, &QAction::triggered, this, &KisMainWindow::showManual);
+ 
+ #if 0
+     //check for colliding shortcuts

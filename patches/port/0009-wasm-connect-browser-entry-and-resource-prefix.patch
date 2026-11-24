@@ -1,0 +1,76 @@
+Subject: [PATCH] Connect the browser entry and preloaded resource prefix
+
+The port repository supplies browser status glue. Export ENV for the Qt
+loader and use a stable in-memory installation prefix independent of host
+build paths. Window visibility is only a startup signal, not painting proof.
+
+diff --git a/krita/CMakeLists.txt b/krita/CMakeLists.txt
+--- a/krita/CMakeLists.txt
++++ b/krita/CMakeLists.txt
+@@ -207,11 +207,15 @@
+     kis_add_library(krita SHARED ${krita_SRCS})
+     set_target_properties(krita PROPERTIES PREFIX "")
+ elseif(EMSCRIPTEN)
+-    qt_add_executable(krita ${krita_SRCS})
++    if(NOT EXISTS "${KRITA_WASM_GLUE_DIR}/browser_status.cpp")
++        message(FATAL_ERROR "Set KRITA_WASM_GLUE_DIR to the port repository's src")
++    endif()
++    qt_add_executable(krita ${krita_SRCS} "${KRITA_WASM_GLUE_DIR}/browser_status.cpp")
++    set_property(TARGET krita APPEND PROPERTY QT_WASM_EXTRA_EXPORTED_METHODS ENV)
+     get_property(wasm_plugins GLOBAL PROPERTY KRITA_WASM_PLUGIN_TARGETS)
+     target_link_libraries(krita PRIVATE kritaqmlcomponents)
+     krita_wasm_import_plugins(krita ${wasm_plugins})
+-    set_target_properties(krita PROPERTIES QT_WASM_EXPORT_NAME kritaWasm QT_WASM_PTHREAD_POOL_SIZE 4)
++    set_target_properties(krita PROPERTIES QT_WASM_EXPORT_NAME kritaWasm QT_WASM_PTHREAD_POOL_SIZE 8 QT_WASM_INITIAL_MEMORY 256MB)
+     target_link_options(krita PRIVATE -sDISABLE_EXCEPTION_CATCHING=0 -sASSERTIONS=1)
+ else()
+     add_executable(krita ${krita_SRCS})
+diff --git a/krita/main.cc b/krita/main.cc
+--- a/krita/main.cc
++++ b/krita/main.cc
+@@ -128,6 +128,11 @@
+ } // namespace
+ #endif
+ 
++#ifdef __EMSCRIPTEN__
++extern void kritaWasmConfigureThreads();
++extern void kritaWasmScheduleStatus();
++#endif
++
+ namespace
+ {
+ 
+@@ -216,6 +221,9 @@
+ 
+ extern "C" MAIN_EXPORT int MAIN_FN(int argc, char **argv)
+ {
++#ifdef __EMSCRIPTEN__
++    kritaWasmConfigureThreads();
++#endif
+ #ifdef Q_OS_ANDROID
+     KisAndroidUtils::performInitialSetup();
+ #endif
+@@ -871,6 +879,10 @@
+         return 1;
+     }
+ 
++#ifdef __EMSCRIPTEN__
++    kritaWasmScheduleStatus();
++#endif
++
+     int state = KisApplication::exec();
+ 
+     {
+diff --git a/libs/resources/KoResourcePaths.cpp b/libs/resources/KoResourcePaths.cpp
+--- a/libs/resources/KoResourcePaths.cpp
++++ b/libs/resources/KoResourcePaths.cpp
+@@ -140,6 +140,9 @@
+     }
+ 
+     return bundlePath;
++#elif defined(Q_OS_WASM)
++    // The static web bundle preloads its installed data under this prefix.
++    return QStringLiteral("/krita");
+ #elif defined(Q_OS_HAIKU)
+ 	return qApp->applicationDirPath() + "/";
+ #elif defined(Q_OS_ANDROID)

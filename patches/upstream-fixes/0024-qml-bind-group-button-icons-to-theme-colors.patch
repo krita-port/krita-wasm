@@ -1,0 +1,72 @@
+Subject: [PATCH] Bind grouped button icons directly to theme colors
+
+Use the same checked and disabled theme colors as palette.buttonText, but
+without reading the button palette while evaluating its grouped icon.
+Remove the six redundant text-property overrides so the shared button owns
+the reactive icon binding.
+
+diff --git a/qmlmodules/components/qml/button/GroupButton.qml b/qmlmodules/components/qml/button/GroupButton.qml
+--- a/qmlmodules/components/qml/button/GroupButton.qml
++++ b/qmlmodules/components/qml/button/GroupButton.qml
+@@ -73,6 +73,7 @@
+     property int groupPosition: GroupButton.GroupPosition.NoGroup;
+     palette.button: checked? theme.selection.backgroundColor: theme.button.backgroundColor;
+     palette.buttonText: checked? theme.selection.textColor: theme.button.textColor;
++    icon.color: root.checked? theme.selection.textColor: theme.button.textColor;
+     palette.light: checked? theme.selection.lightShadeColor: theme.button.lightShadeColor;
+     palette.midlight: checked? theme.selection.midLightShadeColor: theme.button.midLightShadeColor;
+     palette.mid: checked? theme.selection.midShadeColor: theme.button.midShadeColor;
+diff --git a/plugins/dockers/textproperties/qml/FontStyle.qml b/plugins/dockers/textproperties/qml/FontStyle.qml
+--- a/plugins/dockers/textproperties/qml/FontStyle.qml
++++ b/plugins/dockers/textproperties/qml/FontStyle.qml
+@@ -278,7 +278,6 @@
+             icon.source: "qrc:///16_light_format-text-bold.svg";
+             icon.height: 16;
+             icon.width: 16;
+-            icon.color: palette.buttonText;
+             display: AbstractButton.IconOnly;
+             text: i18n("Bold");
+             checked: fontWeight >= 700;
+@@ -299,7 +298,6 @@
+             icon.source: "qrc:///16_light_format-text-italic.svg";
+             icon.height: 16;
+             icon.width: 16;
+-            icon.color: palette.buttonText;
+             display: AbstractButton.IconOnly;
+             text: i18n("Italic");
+             checked: fontSlant != CssFontStyleModel.StyleNormal;
+diff --git a/plugins/dockers/textproperties/qml/TextAlign.qml b/plugins/dockers/textproperties/qml/TextAlign.qml
+--- a/plugins/dockers/textproperties/qml/TextAlign.qml
++++ b/plugins/dockers/textproperties/qml/TextAlign.qml
+@@ -230,7 +230,6 @@
+                                                                                     : "qrc:///16_light_format-justify-right.svg";
+                 icon.height: 16;
+                 icon.width: 16;
+-                icon.color: palette.buttonText;
+                 ButtonGroup.group: alignGroup;
+                 Layout.preferredWidth: height;
+                 onToggled: setAlignmentFromButtons();
+@@ -242,7 +241,6 @@
+                 icon.source: "qrc:///16_light_format-justify-center.svg";
+                 icon.height: 16;
+                 icon.width: 16;
+-                icon.color: palette.buttonText;
+                 ButtonGroup.group: alignGroup;
+                 Layout.preferredWidth: height;
+                 onToggled: {
+@@ -257,7 +255,6 @@
+                                                                                     : "qrc:///16_light_format-justify-left.svg";
+                 icon.height: 16;
+                 icon.width: 16;
+-                icon.color: palette.buttonText;
+                 ButtonGroup.group: alignGroup;
+                 Layout.preferredWidth: height;
+                 onToggled: setAlignmentFromButtons();
+@@ -272,7 +269,6 @@
+             checked: textAlignAll === KoSvgText.AlignJustify;
+             icon.height: 16;
+             icon.width: 16;
+-            icon.color: palette.buttonText;
+             icon.source: "qrc:///16_light_format-justify-fill.svg";
+             Layout.preferredWidth: height;
+             onToggled: setAlignmentFromButtons();

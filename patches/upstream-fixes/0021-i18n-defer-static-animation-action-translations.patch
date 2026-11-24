@@ -1,0 +1,109 @@
+Subject: [PATCH] Defer animation action translation until UI construction
+
+Store untranslated KLocalizedString descriptors during static initialization.
+Resolve them at the existing timeline UI call sites, after the application
+and its selected language exist. This also preserves the selected language
+in static builds instead of caching a pre-application translation.
+
+diff --git a/plugins/dockers/animation/KisAnimUtils.cpp b/plugins/dockers/animation/KisAnimUtils.cpp
+--- a/plugins/dockers/animation/KisAnimUtils.cpp
++++ b/plugins/dockers/animation/KisAnimUtils.cpp
+@@ -23,15 +23,15 @@
+ 
+ 
+ namespace KisAnimUtils {
+-    const QString lazyFrameCreationActionName = i18n("Auto Frame Mode");
+-    const QString dropFramesActionName = i18n("Drop Frames");
+-
+-    const QString newLayerActionName = i18n("New Layer");
+-    const QString pinExistingLayerActionName = i18n("Pin Existing Layer");
+-    const QString removeLayerActionName = i18n("Remove Layer");
+-
+-    const QString addTransformKeyframeActionName = i18n("Add transform keyframe");
+-    const QString removeTransformKeyframeActionName = i18n("Remove transform keyframe");
++    const KLocalizedString lazyFrameCreationActionName = ki18n("Auto Frame Mode");
++    const KLocalizedString dropFramesActionName = ki18n("Drop Frames");
++
++    const KLocalizedString newLayerActionName = ki18n("New Layer");
++    const KLocalizedString pinExistingLayerActionName = ki18n("Pin Existing Layer");
++    const KLocalizedString removeLayerActionName = ki18n("Remove Layer");
++
++    const KLocalizedString addTransformKeyframeActionName = ki18n("Add transform keyframe");
++    const KLocalizedString removeTransformKeyframeActionName = ki18n("Remove transform keyframe");
+ 
+     KUndo2Command* createKeyframeCommand(KisImageSP image, KisNodeSP node, const QString &channelId, int time, bool copy, KUndo2Command *parentCommand) {
+         KUndo2Command *cmd = new KisCommandUtils::LambdaCommand(
+diff --git a/plugins/dockers/animation/KisAnimUtils.h b/plugins/dockers/animation/KisAnimUtils.h
+--- a/plugins/dockers/animation/KisAnimUtils.h
++++ b/plugins/dockers/animation/KisAnimUtils.h
+@@ -11,6 +11,7 @@
+ 
+ #include <boost/operators.hpp>
+ #include <QModelIndexList>
++#include <klocalizedstring.h>
+ 
+ #include <kritaanimationdocker_export.h>
+ 
+@@ -77,17 +78,17 @@
+ 
+     bool supportsContentFrames(KisNodeSP node);
+ 
+-    extern const QString lazyFrameCreationActionName;
+-    extern const QString dropFramesActionName;
++    extern const KLocalizedString lazyFrameCreationActionName;
++    extern const KLocalizedString dropFramesActionName;
+ 
+-    extern const QString newLayerActionName;
+-    extern const QString pinExistingLayerActionName;
+-    extern const QString removeLayerActionName;
++    extern const KLocalizedString newLayerActionName;
++    extern const KLocalizedString pinExistingLayerActionName;
++    extern const KLocalizedString removeLayerActionName;
+ 
+     extern const QString addOpacityKeyframeActionName;
+-    extern const QString addTransformKeyframeActionName;
++    extern const KLocalizedString addTransformKeyframeActionName;
+     extern const QString removeOpacityKeyframeActionName;
+-    extern const QString removeTransformKeyframeActionName;
++    extern const KLocalizedString removeTransformKeyframeActionName;
+ };
+ 
+ 
+diff --git a/plugins/dockers/animation/KisAnimTimelineDocker.cpp b/plugins/dockers/animation/KisAnimTimelineDocker.cpp
+--- a/plugins/dockers/animation/KisAnimTimelineDocker.cpp
++++ b/plugins/dockers/animation/KisAnimTimelineDocker.cpp
+@@ -622,7 +622,7 @@
+         actionText = QString("%1 (%2)\n"
+                              "%3\n"
+                              "[PlaybackEngine: %4]")
+-            .arg(KisAnimUtils::dropFramesActionName)
++            .arg(KisAnimUtils::dropFramesActionName.toString())
+             .arg(KritaUtils::toLocalizedOnOff(shouldDropFrames))
+             .arg(i18n("Enable to preserve playback timing."))
+             .arg(playbackEngineClass);
+@@ -632,7 +632,7 @@
+                        "%4\n"
+                        "%5\n"
+                        "[PlaybackEngine: %6]")
+-            .arg(KisAnimUtils::dropFramesActionName)
++            .arg(KisAnimUtils::dropFramesActionName.toString())
+             .arg(KritaUtils::toLocalizedOnOff(shouldDropFrames))
+                          .arg(i18n("Effective FPS:\t%1", QString::number(effectiveFps, 'f', 1)))
+             .arg(i18n("Real FPS:\t%1", QString::number(realFps, 'f', 1)))
+diff --git a/plugins/dockers/animation/KisAnimTimelineFramesView.cpp b/plugins/dockers/animation/KisAnimTimelineFramesView.cpp
+--- a/plugins/dockers/animation/KisAnimTimelineFramesView.cpp
++++ b/plugins/dockers/animation/KisAnimTimelineFramesView.cpp
+@@ -188,10 +188,10 @@
+     m_d->layerEditingMenu->addSection(i18n("Edit Layers:"));
+     m_d->layerEditingMenu->addSeparator();
+ 
+-    m_d->layerEditingMenu->addAction(KisAnimUtils::newLayerActionName, this, SLOT(slotAddNewLayer()));
+-    m_d->layerEditingMenu->addAction(KisAnimUtils::removeLayerActionName, this, SLOT(slotRemoveLayer()));
++    m_d->layerEditingMenu->addAction(KisAnimUtils::newLayerActionName.toString(), this, SLOT(slotAddNewLayer()));
++    m_d->layerEditingMenu->addAction(KisAnimUtils::removeLayerActionName.toString(), this, SLOT(slotRemoveLayer()));
+     m_d->layerEditingMenu->addSeparator();
+-    m_d->existingLayersMenu = m_d->layerEditingMenu->addMenu(KisAnimUtils::pinExistingLayerActionName);
++    m_d->existingLayersMenu = m_d->layerEditingMenu->addMenu(KisAnimUtils::pinExistingLayerActionName.toString());
+ 
+     connect(m_d->existingLayersMenu, SIGNAL(aboutToShow()), SLOT(slotUpdateLayersMenu()));
+     connect(m_d->existingLayersMenu, SIGNAL(triggered(QAction*)), SLOT(slotAddExistingLayer(QAction*)));

@@ -1,0 +1,171 @@
+Subject: [PATCH] Guard desktop subprocess operations by Qt process capability
+
+Keep clipboard and codec parsing available without QProcess. Report an
+explicit unsupported error for external ffmpeg jobs instead of pretending
+to start a process. Native Qt process-enabled behavior stays unchanged.
+
+diff --git a/libs/widgetutils/xmlgui/kcheckaccelerators.cpp b/libs/widgetutils/xmlgui/kcheckaccelerators.cpp
+--- a/libs/widgetutils/xmlgui/kcheckaccelerators.cpp
++++ b/libs/widgetutils/xmlgui/kcheckaccelerators.cpp
+@@ -167,13 +167,16 @@
+             }
+ 
+             //kWarning()<<KGlobal::activeComponent().catalogName()<<text;
+-            if (copyWidgetTextCommand.isEmpty()) {
+-                QClipboard *clipboard = QApplication::clipboard();
+-                clipboard->setText(text);
+-            } else {
++#if QT_CONFIG(process)
++            if (!copyWidgetTextCommand.isEmpty()) {
+                 QProcess *script = new QProcess(this);
+                 script->start(copyWidgetTextCommand.arg(text, QFile::decodeName(KLocalizedString::applicationDomain())), QStringList());
+                 connect(script, SIGNAL(finished(int,QProcess::ExitStatus)), script, SLOT(deleteLater()));
++            } else
++#endif
++            {
++                QClipboard *clipboard = QApplication::clipboard();
++                clipboard->setText(text);
+             }
+             e->accept();
+             return true;
+diff --git a/libs/ui/animation/KisFFMpegWrapper.h b/libs/ui/animation/KisFFMpegWrapper.h
+--- a/libs/ui/animation/KisFFMpegWrapper.h
++++ b/libs/ui/animation/KisFFMpegWrapper.h
+@@ -99,7 +99,9 @@
+     static void fixUpNonEmbeddedProcessEnvironment(const QString &processPath, QProcess &process);
+ 
+ private:
++#if QT_CONFIG(process)
+     QScopedPointer<QProcess> m_process;
++#endif
+     QSharedPointer<QProgressDialog> m_progress = nullptr;
+     KisFFMpegWrapperSettings m_processSettings;
+     
+diff --git a/libs/ui/animation/KisFFMpegWrapper.cpp b/libs/ui/animation/KisFFMpegWrapper.cpp
+--- a/libs/ui/animation/KisFFMpegWrapper.cpp
++++ b/libs/ui/animation/KisFFMpegWrapper.cpp
+@@ -45,6 +45,7 @@
+ 
+ void KisFFMpegWrapper::startNonBlocking(const KisFFMpegWrapperSettings &settings)
+ {
++#if QT_CONFIG(process)
+     KIS_ASSERT(m_process == nullptr);
+ 
+     m_stdoutBuffer.clear();
+@@ -158,6 +159,10 @@
+     fixUpNonEmbeddedProcessEnvironment(settings.processPath, *m_process);
+ 
+     m_process->start(settings.processPath, args);
++#else
++    Q_UNUSED(settings);
++    Q_EMIT sigFinishedWithError(i18n("External processes are not supported on this platform."));
++#endif
+ }
+ 
+ KisImportExportErrorCode KisFFMpegWrapper::start(const KisFFMpegWrapperSettings &settings)
+@@ -195,6 +200,7 @@
+ 
+ bool KisFFMpegWrapper::waitForFinished(int msecs)
+ {
++#if QT_CONFIG(process)
+     if (!m_process) return false;
+ 
+     if (m_process->waitForStarted(msecs)) {
+@@ -202,6 +208,10 @@
+     }
+ 
+     return false;
++#else
++    Q_UNUSED(msecs);
++    return false;
++#endif
+ }
+ 
+ void KisFFMpegWrapper::updateProgressDialog(int progressValue) {
+@@ -221,9 +231,11 @@
+ 
+     if (m_processSettings.totalFrames > 0) m_progress->setValue(100 * progressValue / m_processSettings.totalFrames);
+ 
++#if QT_CONFIG(process)
+     if (m_process && m_process->state() == QProcess::Running) {
+         QApplication::processEvents();
+     }
++#endif
+ }
+ 
+ bool KisFFMpegWrapper::ffprobeCheckStreamsValid(const QJsonObject& ffprobeJsonObj, const QString& ffprobeSTDERR)
+@@ -252,6 +264,7 @@
+ 
+ void KisFFMpegWrapper::reset()
+ {
++#if QT_CONFIG(process)
+     if (m_process == nullptr)
+         return;
+ 
+@@ -260,10 +273,12 @@
+         m_process->kill();
+     }
+     m_process.reset();
++#endif
+ }
+ 
+ void KisFFMpegWrapper::slotReadyReadSTDERR()
+ {
++#if QT_CONFIG(process)
+     QByteArray stderrRawBuffer = m_process->readAllStandardError();
+     
+     Q_EMIT sigReadSTDERR(stderrRawBuffer);
+@@ -305,10 +320,12 @@
+         Q_EMIT sigProgressUpdated(frameNo);
+     }
+     
++#endif
+ }
+ 
+ void KisFFMpegWrapper::slotReadyReadSTDOUT()
+ {
++#if QT_CONFIG(process)
+     QByteArray stdoutRawBuffer = m_process->readAllStandardOutput();
+     
+     Q_EMIT sigReadSTDOUT(stdoutRawBuffer);
+@@ -338,6 +355,7 @@
+     }
+ 
+     
++#endif
+ }
+ 
+ void KisFFMpegWrapper::slotStarted()
+@@ -356,9 +374,11 @@
+     
+     if (exitCode != 0) {
+         m_errorMessage.remove(junkRegex);
++#if QT_CONFIG(process)
+         if (m_process->exitStatus() == QProcess::CrashExit) {
+             m_errorMessage = i18n("FFMpeg Crashed") % "\n" % m_errorMessage;
+         }
++#endif
+ 
+         Q_EMIT sigFinishedWithError(m_errorMessage);
+     } else {
+@@ -415,6 +435,7 @@
+ 
+ QByteArray KisFFMpegWrapper::runProcessAndReturn(const QString &processPath, const QStringList &args, int msecs)
+ {
++#if QT_CONFIG(process)
+     QProcess runProcess;
+     
+     fixUpNonEmbeddedProcessEnvironment(processPath, runProcess);
+@@ -432,6 +453,12 @@
+     if (successfulStart) return runProcess.readAllStandardOutput();
+ 
+     return "";
++#else
++    Q_UNUSED(processPath);
++    Q_UNUSED(args);
++    Q_UNUSED(msecs);
++    return {};
++#endif
+ }
+ 
+ QString KisFFMpegWrapper::configuredFFMpegLocation()

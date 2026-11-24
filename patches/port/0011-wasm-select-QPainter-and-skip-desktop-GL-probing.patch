@@ -1,0 +1,52 @@
+Subject: [PATCH] Keep the first browser profile on the QPainter canvas
+
+Do not expose a GPU canvas or perform desktop GL probing in the browser.
+Other platforms retain their existing renderer selection and probing.
+
+diff --git a/libs/ui/kis_config.cc b/libs/ui/kis_config.cc
+--- a/libs/ui/kis_config.cc
++++ b/libs/ui/kis_config.cc
+@@ -1016,6 +1016,10 @@
+ 
+ bool KisConfig::useOpenGL(bool defaultValue) const
+ {
++#ifdef Q_OS_WASM
++    Q_UNUSED(defaultValue);
++    return false;
++#else
+     if (defaultValue) {
+         return true;
+     }
+@@ -1024,6 +1028,7 @@
+     QSettings kritarc(configPath + QStringLiteral("/kritadisplayrc"), QSettings::IniFormat);
+ 
+     return kritarc.value("OpenGLRenderer", "auto").toString() != "none";
++#endif
+ }
+ 
+ void KisConfig::disableOpenGL() const
+diff --git a/libs/ui/opengl/KisOpenGLModeProber.cpp b/libs/ui/opengl/KisOpenGLModeProber.cpp
+--- a/libs/ui/opengl/KisOpenGLModeProber.cpp
++++ b/libs/ui/opengl/KisOpenGLModeProber.cpp
+@@ -141,6 +141,13 @@
+ KisOpenGLModeProber::probeFormat(const KisOpenGL::RendererConfig &rendererConfig,
+                                  bool adjustGlobalState)
+ {
++#ifdef Q_OS_WASM
++    // QOpenGLWidget is outside the first browser profile. Avoid creating
++    // temporary GUI applications and probing desktop GL during startup.
++    Q_UNUSED(rendererConfig);
++    Q_UNUSED(adjustGlobalState);
++    return boost::none;
++#else
+     const QSurfaceFormat &format = rendererConfig.format;
+ 
+     dbgOpenGL << "Probing format" << rendererConfig.rendererId() << rendererConfig.angleRenderer
+@@ -234,6 +241,7 @@
+     dbgOpenGL << "Probe returned" << result.rendererString() << result.driverVersionString() << result.isOpenGLES();
+ 
+     return result;
++#endif
+ }
+ 
+ bool KisOpenGLModeProber::fuzzyCompareColorSpaces(const KisSurfaceColorSpaceWrapper &lhs, const KisSurfaceColorSpaceWrapper &rhs)

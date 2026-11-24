@@ -1,0 +1,29 @@
+Subject: [PATCH] Export diagnostic text directly to the browser device
+
+The desktop log viewer writes into the virtual filesystem on Wasm. Use
+Qt's existing browser file-content API from the Save button's fresh user
+activation instead, exporting exactly the displayed UTF-8 text. Keep the
+viewer open for retries and preserve the desktop path unchanged.
+
+diff --git a/plugins/extensions/buginfo/dlg_buginfo.cpp b/plugins/extensions/buginfo/dlg_buginfo.cpp
+--- a/plugins/extensions/buginfo/dlg_buginfo.cpp
++++ b/plugins/extensions/buginfo/dlg_buginfo.cpp
+@@ -17,6 +17,7 @@
+ #include <QThread>
+ #include <QFile>
+ #include <QFileInfo>
++#include <QFileDialog>
+ #include <QSettings>
+ #include <QStandardPaths>
+ #include <QScreen>
+@@ -73,6 +74,10 @@
+ 
+ void DlgBugInfo::saveToFile()
+ {
++#ifdef Q_OS_WASM
++    QFileDialog::saveFileContent(m_page->txtBugInfo->toPlainText().toUtf8(), defaultNewFileName(), this);
++    return;
++#endif
+     KoFileDialog dlg(this, KoFileDialog::SaveFile, i18n("Save to file"));
+     dlg.setDefaultDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/" + defaultNewFileName());
+     dlg.setMimeTypeFilters(QStringList("text/plain"), "text/plain");

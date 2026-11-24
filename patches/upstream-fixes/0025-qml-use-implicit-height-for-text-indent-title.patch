@@ -1,0 +1,18 @@
+Subject: [PATCH] Size the text indent title from its implicit layout height
+
+The RowLayout positions and sizes its children from its allocated height.
+Using childrenRect.height as that height feeds the layout result back into
+its input. Use its size hint, as the FontStyle title already does.
+
+diff --git a/plugins/dockers/textproperties/qml/TextIndent.qml b/plugins/dockers/textproperties/qml/TextIndent.qml
+--- a/plugins/dockers/textproperties/qml/TextIndent.qml
++++ b/plugins/dockers/textproperties/qml/TextIndent.qml
+@@ -99,7 +99,7 @@
+ 
+     titleItem: RowLayout {
+         width: parent.width;
+-        height: childrenRect.height;
++        height: implicitHeight;
+         spacing: columnSpacing;
+ 
+         Kis.DoubleSliderSpinBox {

@@ -1,0 +1,23 @@
+Subject: [PATCH] Use an explicit four GiB memory budget on WebAssembly
+
+The browser build uses wasm32 with MAXIMUM_MEMORY=4GB. Use 4096 MiB
+as its configured RAM budget instead of repeatedly warning about the
+unsupported native physical-memory query. This is a budgeting value,
+not a measurement of the host's physical RAM or available memory.
+
+diff --git a/libs/image/kis_image_config.cpp b/libs/image/kis_image_config.cpp
+--- a/libs/image/kis_image_config.cpp
++++ b/libs/image/kis_image_config.cpp
+@@ -428,7 +428,11 @@ int KisImageConfig::totalRAM()
+     int totalMemory = 1000; // MiB
+     int error = 1;
+ 
+-#if defined Q_OS_LINUX
++#if defined __EMSCRIPTEN__
++    // Explicit browser memory budget, matching MAXIMUM_MEMORY=4GB.
++    totalMemory = 4096;
++    error = 0;
++#elif defined Q_OS_LINUX
+     struct sysinfo info;
+ 
+     error = sysinfo(&info);

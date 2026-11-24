@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "name": "noto-sans-khmer",
+  "version": "2.004",
+  "release_url": "https://github.com/notofonts/khmer/releases/download/NotoSansKhmer-v2.004/NotoSansKhmer-v2.004.zip",
+  "archive": {
+    "filename": "NotoSansKhmer-v2.004.zip",
+    "url": "https://github.com/notofonts/khmer/releases/download/NotoSansKhmer-v2.004/NotoSansKhmer-v2.004.zip",
+    "sha256": "19382ca97d62febea1c735ebee35a5aa4f03beca9b6ea6f6d86b7a7a0025a688"
+  },
+  "files": [
+    {
+      "member": "NotoSansKhmer/hinted/ttf/NotoSansKhmer-Regular.ttf",
+      "path": "fonts/NotoSansKhmer-Regular.ttf",
+      "destination": "/fonts/NotoSansKhmer-Regular.ttf",
+      "sha256": "e66675f2082788f0511a714bef5a1748928294b38c8e286a96ea73a864b5e605"
+    },
+    {
+      "member": "OFL.txt",
+      "path": "licenses/NotoSansKhmer-OFL.txt",
+      "destination": "/krita/share/licenses/runtime-fonts/NotoSansKhmer-OFL.txt",
+      "sha256": "be0407f060aea48787ff9e75d8d3aedef70aef113b3ce9aca26fdaacd10b1870"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+Subject: [PATCH] Preserve the installation prefix trailing separator
+
+Resource enumeration appends share/ directly to this prefix. Without the
+separator the browser misses its input profiles and ignores canvas input.
+
+diff --git a/libs/resources/KoResourcePaths.cpp b/libs/resources/KoResourcePaths.cpp
+--- a/libs/resources/KoResourcePaths.cpp
++++ b/libs/resources/KoResourcePaths.cpp
+@@ -141,8 +141,8 @@
+ 
+     return bundlePath;
+ #elif defined(Q_OS_WASM)
+-    // The static web bundle preloads its installed data under this prefix.
+-    return QStringLiteral("/krita");
++    // Prefix consumers also append "share/" directly, without a separator.
++    return QStringLiteral("/krita/");
+ #elif defined(Q_OS_HAIKU)
+ 	return qApp->applicationDirPath() + "/";
+ #elif defined(Q_OS_ANDROID)

@@ -1,0 +1,24 @@
+Subject: [PATCH] Preserve resource chooser lifecycle connections during destruction
+
+QObject automatically disconnects signals during its destruction. An early
+blanket disconnect unnecessarily removes destroyed observers and triggers
+Qt's wildcard-disconnect diagnostic when resource choosers are deleted.
+
+The upstream file retains its original copyright and license notices.
+
+Related upstream issue: https://bugs.kde.org/show_bug.cgi?id=509947
+The report lists resource chooser wildcard-disconnect diagnostics and the
+resulting log-docker reentrancy. This changes chooser destruction, not the
+upstream log-handler fix.
+
+diff --git a/libs/resourcewidgets/KisResourceItemChooser.cpp b/libs/resourcewidgets/KisResourceItemChooser.cpp
+--- a/libs/resourcewidgets/KisResourceItemChooser.cpp
++++ b/libs/resourcewidgets/KisResourceItemChooser.cpp
+@@ -296,7 +296,6 @@
+ KisResourceItemChooser::~KisResourceItemChooser()
+ {
+-    disconnect();
+     delete d;
+ }
+ 
+ void KisResourceItemChooser::setResponsiveness(bool isResponsive)

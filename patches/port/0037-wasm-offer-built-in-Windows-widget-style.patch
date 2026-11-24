@@ -1,0 +1,44 @@
+Subject: [PATCH] Offer built-in widget styles and publish browser changes
+
+Qt's classic Windows style is portable and already included in our static
+SDK. Keep Krita's native style actions available to both its menu and the
+browser settings without changing the desktop style allowlists. Notify
+the page after native changes, including actions in newly created windows.
+
+diff --git a/libs/ui/KisApplication.cpp b/libs/ui/KisApplication.cpp
+--- a/libs/ui/KisApplication.cpp
++++ b/libs/ui/KisApplication.cpp
+@@ -250,6 +250,9 @@
+ #else
+         QStringList styles = QStringList() << "haiku" << "macos" << "breeze" << "fusion";
+ #endif
++#ifdef Q_OS_WASM
++        styles << QStringLiteral("windows");
++#endif
+         if (!styles.contains(style()->objectName().toLower())) {
+             Q_FOREACH (const QString & style, styles) {
+                 if (!setStyle(style)) {
+diff --git a/libs/ui/KisMainWindow.cpp b/libs/ui/KisMainWindow.cpp
+--- a/libs/ui/KisMainWindow.cpp
++++ b/libs/ui/KisMainWindow.cpp
+@@ -450,6 +450,9 @@
+ #else
+     QStringList allowableStyles = QStringList() << "macos" << "breeze" << "fusion";
+ #endif
++#ifdef Q_OS_WASM
++    allowableStyles << QStringLiteral("windows");
++#endif
+ 
+     Q_FOREACH (QString styleName, QStyleFactory::keys()) {
+ #ifdef Q_OS_ANDROID
+@@ -2599,6 +2602,10 @@
+ #endif
+          }
+      }
++#ifdef Q_OS_WASM
++     extern void kritaWasmPublishWidgetStyles();
++     kritaWasmPublishWidgetStyles();
++#endif
+ }
+ 
+ QList<QDockWidget*> KisMainWindow::dockWidgets() const

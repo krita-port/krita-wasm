@@ -1,0 +1,110 @@
+Subject: [PATCH] Use Qt feature checks to select the GLES code paths
+
+Qt 6 advertises GLES through QT_CONFIG(opengles2), not QT_OPENGL_ES_2.
+Match Qt's header selection rather than enabling desktop-only formats
+on Wasm. This fixes compilation; the initial browser canvas stays QPainter.
+
+diff --git a/libs/ui/opengl/kis_opengl_image_textures.cpp b/libs/ui/opengl/kis_opengl_image_textures.cpp
+--- a/libs/ui/opengl/kis_opengl_image_textures.cpp
++++ b/libs/ui/opengl/kis_opengl_image_textures.cpp
+@@ -6,11 +6,11 @@
+ 
+ #include "opengl/kis_opengl_image_textures.h"
+ 
+-#ifdef QT_OPENGL_ES_2
++#if QT_CONFIG(opengles2)
+ #include <qopengl.h>
+ #endif
+ 
+-#ifndef QT_OPENGL_ES_2
++#if !QT_CONFIG(opengles2)
+ #include <QOpenGLFunctions>
+ #endif
+ #include <QOpenGLContext>
+@@ -566,7 +566,7 @@
+ #endif
+ 
+     if (haveBuiltInOpenExr && (KisOpenGL::hasOpenGLES() || KisOpenGL::hasOpenGL3())) {
+-#ifndef QT_OPENGL_ES_2
++#if !QT_CONFIG(opengles2)
+         texturesInfo.internalFormat = GL_RGBA16F;
+         dbgUI << "Using half (GLES or GL3)";
+         texturesInfo.type = GL_HALF_FLOAT;
+@@ -644,7 +644,7 @@
+     if (!(m_image && ctx)) return;
+ 
+     if (!KisOpenGL::hasOpenGLES()) {
+-#ifndef QT_OPENGL_ES_2
++#if !QT_CONFIG(opengles2)
+         m_texturesInfo.internalFormat = GL_RGBA8;
+         m_texturesInfo.type = GL_UNSIGNED_BYTE;
+         m_texturesInfo.format = GL_BGRA;
+@@ -653,7 +653,7 @@
+                 "Unexpected KisOpenGL::hasOpenGLES returned false");
+ #endif
+     } else {
+-#ifdef QT_OPENGL_ES_2
++#if QT_CONFIG(opengles2)
+         m_texturesInfo.internalFormat = GL_RGBA8;
+         m_texturesInfo.type = GL_UNSIGNED_BYTE;
+         m_texturesInfo.format = GL_RGBA;
+@@ -686,7 +686,7 @@
+         }
+         else if (colorDepthId == Float32BitsColorDepthID) {
+             if (KisOpenGL::hasOpenGLES() || KisOpenGL::hasOpenGL3()) {
+-#ifndef QT_OPENGL_ES_2
++#if !QT_CONFIG(opengles2)
+                 m_texturesInfo.internalFormat = GL_RGBA32F;
+                 dbgUI << "Using float (GLES or GL3)";
+                 m_texturesInfo.type = GL_FLOAT;
+@@ -727,7 +727,7 @@
+         }
+         else if (colorDepthId == Integer16BitsColorDepthID) {
+             if (!KisOpenGL::hasOpenGLES()) {
+-#ifndef QT_OPENGL_ES_2
++#if !QT_CONFIG(opengles2)
+                 m_texturesInfo.internalFormat = GL_RGBA16;
+                 m_texturesInfo.type = GL_UNSIGNED_SHORT;
+ 
+@@ -769,7 +769,7 @@
+         // We will convert the colorspace to 16 bits rgba, instead of 8 bits
+         if (colorDepthId == Integer16BitsColorDepthID) {
+             if (!KisOpenGL::hasOpenGLES()) {
+-#ifndef QT_OPENGL_ES_2
++#if !QT_CONFIG(opengles2)
+                 m_texturesInfo.internalFormat = GL_RGBA16;
+                 m_texturesInfo.type = GL_UNSIGNED_SHORT;
+                 // On arm M1, GL_BGRA format is not aligned properly at the driver
+diff --git a/libs/ui/opengl/kis_texture_tile.cpp b/libs/ui/opengl/kis_texture_tile.cpp
+--- a/libs/ui/opengl/kis_texture_tile.cpp
++++ b/libs/ui/opengl/kis_texture_tile.cpp
+@@ -10,7 +10,7 @@
+ #include "KisOpenGLBufferCircularStorage.h"
+ 
+ #include <kis_debug.h>
+-#if !defined(QT_OPENGL_ES)
++#if !QT_CONFIG(opengles2)
+ #include <QOpenGLBuffer>
+ #endif
+ 
+@@ -34,7 +34,7 @@
+     f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, m_numMipmapLevels);
+ 
+     if ((m_texturesInfo->internalFormat == GL_RGBA8 && m_texturesInfo->format == GL_RGBA)
+-#ifndef QT_OPENGL_ES_2
++#if !QT_CONFIG(opengles2)
+         || (m_texturesInfo->internalFormat == GL_RGBA16 && m_texturesInfo->format == GL_RGBA)
+ #endif
+         || (m_texturesInfo->internalFormat == GL_RGBA16_EXT && m_texturesInfo->format == GL_RGBA)
+diff --git a/libs/ui/opengl/kis_opengl.cpp b/libs/ui/opengl/kis_opengl.cpp
+--- a/libs/ui/opengl/kis_opengl.cpp
++++ b/libs/ui/opengl/kis_opengl.cpp
+@@ -583,7 +583,7 @@
+         return QOpenGLContext::LibGL;
+ #else
+     // https://invent.kde.org/szaman/qtbase/-/blob/krita/5.15/src/plugins/platforms/xcb/gl_integrations/xcb_glx/qglxintegration.cpp#L246
+-#if defined(QT_OPENGL_ES_2)
++#if QT_CONFIG(opengles2)
+     return QOpenGLContext::LibGLES;
+ #else
+     return QOpenGLContext::LibGL;

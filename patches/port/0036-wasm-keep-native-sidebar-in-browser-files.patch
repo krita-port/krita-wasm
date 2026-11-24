@@ -1,0 +1,265 @@
+Subject: [PATCH] Restrict browser file dialogs to the Documents tree
+
+User-facing Wasm file dialogs browse only the persistent Documents tree.
+Keep Qt's native directory navigation and subfolders, but omit filesystem
+ancestors from the sidebar/location field, filter external symlinks and
+validate typed paths before accepting. Internal virtual filesystem access
+is unchanged. Upstream issue searches for a WebAssembly document-root file
+dialog restriction found no matching report.
+
+Persist native picker rename/delete operations through the existing serialized
+browser-cache queue. Closing the picker also commits directory changes.
+Upstream issue searches found no matching IDBFS file-picker mutation report.
+
+Reject typed logical or backing-storage paths outside Documents, even when their canonical target has a visible cache alias. Upstream issue searches found no matching WebAssembly path-boundary report.
+
+diff --git a/libs/widgetutils/KisPreviewFileDialog.cpp b/libs/widgetutils/KisPreviewFileDialog.cpp
+--- a/libs/widgetutils/KisPreviewFileDialog.cpp
++++ b/libs/widgetutils/KisPreviewFileDialog.cpp
+@@ -5,28 +5,95 @@
+  */
+ #include "KisPreviewFileDialog.h"
+ 
++#include <QDebug>
++#include <QFileIconProvider>
++#include <QHBoxLayout>
++#include <QLabel>
+ #include <QSplitter>
+-#include <QLabel>
+-#include <QFileIconProvider>
+-#include <QDebug>
+ #include <QToolButton>
+-#include <QHBoxLayout>
++#ifdef Q_OS_WASM
++#include <QAction>
++#include <QComboBox>
++#include <QFileSystemModel>
++#include <QLayout>
++#include <QLineEdit>
++#include <QSortFilterProxyModel>
++#include <QTimer>
++#include <emscripten.h>
++
++namespace
++{
++QString browserFilePath(const QString &path)
++{
++    const QDir root(QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR")));
++    QFileInfo info(path);
++    QStringList missing;
++    while (!info.exists() && !info.isSymLink()) {
++        missing.prepend(info.fileName());
++        const QString parent = info.absolutePath();
++        if (parent == info.absoluteFilePath())
++            return {};
++        info.setFile(parent);
++    }
++    QString physical = info.canonicalFilePath();
++    if (physical.isEmpty())
++        return {};
++    for (const QString &part : missing)
++        physical += QLatin1Char('/') + part;
++    const QString canonical = root.canonicalPath();
++    if (canonical.isEmpty())
++        return {};
++    if (physical == canonical)
++        return root.absolutePath();
++    if (physical.startsWith(canonical + QLatin1Char('/')))
++        return root.filePath(QDir(canonical).relativeFilePath(physical));
++    const QString virtualRoot =
++        QDir(QDir(QString::fromUtf8(qgetenv("KRITA_WASM_RECOVERY_DIR"))).absoluteFilePath(QStringLiteral("../virtual")))
++            .canonicalPath();
++    if (!virtualRoot.isEmpty() && (physical == virtualRoot || physical.startsWith(virtualRoot + QLatin1Char('/')))) {
++        // Resolve the visible alias from the filesystem, including a directory
++        // rename in this dialog. No cached JS/environment name is authoritative.
++        for (const auto &entry : root.entryInfoList(QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot)) {
++            if (entry.isSymLink() && entry.canonicalFilePath() == virtualRoot)
++                return QDir::cleanPath(
++                    QDir(entry.absoluteFilePath()).filePath(QDir(virtualRoot).relativeFilePath(physical)));
++        }
++    }
++    return {};
++}
++
++class BrowserFilesModel : public QSortFilterProxyModel {
++  public:
++    explicit BrowserFilesModel(QObject *parent) : QSortFilterProxyModel(parent) {}
++
++  protected:
++    bool filterAcceptsRow(int row, const QModelIndex &parent) const override {
++        const QString path =
++            sourceModel()->index(row, 0, parent).data(QFileSystemModel::FilePathRole).toString();
++        if (!browserFilePath(path).isEmpty())
++            return true;
++        // QFileDialog still needs ancestor indexes to resolve its root index.
++        // Navigation and the visible location field never expose those roots.
++        const QString canonical =
++            QDir(QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR"))).canonicalPath();
++        return !path.isEmpty() &&
++               (path == QLatin1String("/") || canonical.startsWith(path + QLatin1Char('/')));
++    }
++};
++} // namespace
++#endif
+ 
+ #include <kconfiggroup.h>
++#include <kis_icon_utils.h>
++#include <klocalizedstring.h>
+ #include <ksharedconfig.h>
+-#include <klocalizedstring.h>
+-#include <kis_icon_utils.h>
+-
+-KisAbstractFileIconCreator *KisPreviewFileDialog::s_iconCreator {0};
++
++KisAbstractFileIconCreator *KisPreviewFileDialog::s_iconCreator{0};
+ 
+ KisFileIconProvider::KisFileIconProvider(qreal devicePixelRatioF)
+-    : QFileIconProvider()
+-    , m_devicePixelRatioF(devicePixelRatioF)
+-{
+-}
+-
+-QIcon KisFileIconProvider::icon(const QFileIconProvider::IconType type) const
+-{
++    : QFileIconProvider(), m_devicePixelRatioF(devicePixelRatioF) {}
++
++QIcon KisFileIconProvider::icon(const QFileIconProvider::IconType type) const {
+     return QFileIconProvider::icon(type);
+ }
+ 
+@@ -58,11 +125,54 @@
+     m_previewToggle->setToolTip(i18n("Toggle Preview"));
+     connect(m_previewToggle, SIGNAL(toggled(bool)), SLOT(previewToggled(bool)));
+ 
+-    connect(this, SIGNAL(currentChanged(const QString&)), this, SLOT(onCurrentChanged(const QString&)));
+-}
+-
+-void KisPreviewFileDialog::resetIconProvider()
+-{
++    connect(this, SIGNAL(currentChanged(const QString &)), this,
++            SLOT(onCurrentChanged(const QString &)));
++}
++
++void KisPreviewFileDialog::resetIconProvider() {
++#ifdef Q_OS_WASM
++    const QString root = QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR"));
++    setProxyModel(new BrowserFilesModel(this));
++    // Qt's location combo builds a popup containing filesystem ancestors.
++    // Replace its visible field while retaining Qt's private widget internally.
++    auto *location = new QLineEdit(this);
++    location->setObjectName(QStringLiteral("browserDirectory"));
++    location->setReadOnly(true);
++    if (auto *combo = findChild<QComboBox *>(QStringLiteral("lookInCombo"))) {
++        delete layout()->replaceWidget(combo, location);
++        combo->hide();
++    }
++    const auto navigate = [this, root, location](const QString &path) {
++        const QString allowed = browserFilePath(path);
++        const QString target = allowed.isEmpty() ? root : allowed;
++        if (directory().absolutePath() != target)
++            setDirectory(target);
++        location->setText(target);
++        if (auto *up = findChild<QToolButton *>(QStringLiteral("toParentButton")))
++            up->setEnabled(target != root);
++        if (auto *up = findChild<QAction *>(QStringLiteral("qt_goto_parent_action")))
++            up->setEnabled(target != root);
++    };
++    setHistory({root});
++    connect(this, &QFileDialog::directoryEntered, this, navigate);
++    // Back/forward and programmatic navigation do not emit directoryEntered.
++    // Clamp after Qt finishes updating its view indexes, using the current
++    // directory rather than an older queued signal's destination.
++    auto *files = qobject_cast<QFileSystemModel *>(proxyModel()->sourceModel());
++    const auto persistBrowserChanges = [] {
++        EM_ASM({ globalThis.kritaRecovery.sync().catch(function() {}); });
++    };
++    connect(files, &QFileSystemModel::fileRenamed, this, persistBrowserChanges);
++    connect(files, &QAbstractItemModel::rowsRemoved, this, persistBrowserChanges);
++    connect(this, &QDialog::finished, this, persistBrowserChanges);
++    connect(files, &QFileSystemModel::rootPathChanged, this, [this, navigate] {
++        QTimer::singleShot(0, this, [this, navigate] {
++            navigate(directory().absolutePath());
++        });
++    });
++    navigate(directory().absolutePath());
++#endif
++
+     QSplitter *splitter = findChild<QSplitter *>();
+     if (splitter) {
+         splitter->addWidget(m_preview);
+@@ -80,8 +190,28 @@
+     }
+ }
+ 
+-void KisPreviewFileDialog::onCurrentChanged(const QString &path)
+-{
++#ifdef Q_OS_WASM
++void KisPreviewFileDialog::accept()
++{
++    const QString root = QDir::cleanPath(QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR")));
++    for (const QString &path : selectedFiles()) {
++        const QString selected = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
++        if ((selected != root && !selected.startsWith(root + QLatin1Char('/'))) || browserFilePath(path).isEmpty()) {
++            setDirectory(QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR")));
++            if (auto *edit = findChild<QLineEdit *>(QStringLiteral("fileNameEdit")))
++                edit->clear();
++            return;
++        }
++    }
++    QFileDialog::accept();
++}
++#endif
++
++void KisPreviewFileDialog::onCurrentChanged(const QString &path) {
++#ifdef Q_OS_WASM
++    if (browserFilePath(path).isEmpty())
++        return;
++#endif
+     // Generate the preview only if we're not using the native dialog.
+     // In AppImages, the platform plugins are inaccessible,
+     // so we check the existence of a widget layout instead.
+diff --git a/libs/widgetutils/KisPreviewFileDialog.h b/libs/widgetutils/KisPreviewFileDialog.h
+index 0601f24..aa2cb17 100644
+--- a/libs/widgetutils/KisPreviewFileDialog.h
++++ b/libs/widgetutils/KisPreviewFileDialog.h
+@@ -51,16 +51,20 @@ public:
+ 
+     static KisAbstractFileIconCreator *s_iconCreator;
+ 
+-public Q_SLOTS:
++  public Q_SLOTS:
+ 
+     void onCurrentChanged(const QString &path);
+     void previewToggled(bool showPreview);
+ 
+-private:
++#ifdef Q_OS_WASM
++  protected:
++    void accept() override;
++#endif
+ 
+-    KisFileIconProvider *m_iconProvider {0};
+-    QLabel *m_preview {0};
+-    QToolButton *m_previewToggle {0};
++  private:
++    KisFileIconProvider *m_iconProvider{0};
++    QLabel *m_preview{0};
++    QToolButton *m_previewToggle{0};
+ };
+ 
+ #endif // KISPREVIEWFILEDIALOG_H
+diff --git a/libs/widgetutils/KoFileDialog.cpp b/libs/widgetutils/KoFileDialog.cpp
+index d4ad079..e890725 100644
+--- a/libs/widgetutils/KoFileDialog.cpp
++++ b/libs/widgetutils/KoFileDialog.cpp
+@@ -180,6 +180,10 @@ void KoFileDialog::createFileDialog()
+     d->fileDialog->setOption(QFileDialog::DontConfirmOverwrite, false);
+     d->fileDialog->setOption(QFileDialog::HideNameFilterDetails, dontUseNative ? true : false);
+ 
++#ifdef Q_OS_WASM
++    d->fileDialog->setSidebarUrls(
++        {QUrl::fromLocalFile(QString::fromUtf8(qgetenv("KRITA_WASM_FILES_DIR")))});
++#endif
+ 
+ #ifdef Q_OS_MACOS
+     QList<QUrl> urls = d->fileDialog->sidebarUrls();

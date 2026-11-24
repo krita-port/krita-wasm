@@ -1,0 +1,29 @@
+Subject: [PATCH] Include standard headers directly instead of transitively
+
+Clang/libc++ does not supply these declarations through unrelated headers.
+
+diff --git a/plugins/paintops/libpaintop/KisSensorPackInterface.h b/plugins/paintops/libpaintop/KisSensorPackInterface.h
+--- a/plugins/paintops/libpaintop/KisSensorPackInterface.h
++++ b/plugins/paintops/libpaintop/KisSensorPackInterface.h
+@@ -9,6 +9,7 @@
+ 
+ #include "kritapaintop_export.h"
+ #include <QSharedData>
++#include <vector>
+ 
+ struct KisSensorData;
+ struct KisCurveOptionDataCommon;
+diff --git a/libs/flake/KoShapeBulkActionLock.h b/libs/flake/KoShapeBulkActionLock.h
+--- a/libs/flake/KoShapeBulkActionLock.h
++++ b/libs/flake/KoShapeBulkActionLock.h
+@@ -12,6 +12,10 @@
+ #include <KisAdaptedLock.h>
+ #include <QList>
+ #include <QRect>
++#include <type_traits>
++#include <unordered_map>
++#include <utility>
++#include <vector>
+ 
+ class KoShape;
+ struct KoShapeBulkActionInterface;

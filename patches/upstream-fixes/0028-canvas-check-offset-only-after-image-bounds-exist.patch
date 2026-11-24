@@ -1,0 +1,22 @@
+Subject: [PATCH] Validate canvas image offsets only after bounds are attached
+
+The loading path samples old/new canvas state while synchronizing image
+resolution, before initializeImage attaches image bounds. Skip the
+image-top-left diagnostic for this empty state, where it is not meaningful.
+Keep the same consistency check for every initialized image.
+
+diff --git a/libs/ui/canvas/KisCanvasState.cpp b/libs/ui/canvas/KisCanvasState.cpp
+--- a/libs/ui/canvas/KisCanvasState.cpp
++++ b/libs/ui/canvas/KisCanvasState.cpp
+@@ -44,7 +44,10 @@
+     state.maximumZoom = converter.maxZoom();
+     state.imageRectInWidgetPixels = converter.imageRectInWidgetPixels();
+ 
+-    if (state.imageRectInWidgetPixels.topLeft() != -state.documentOffsetF) {
++    // Loading samples the converter before initializeImage() attaches bounds.
++    // There is no image top-left invariant to check in that empty state.
++    if (!converter.imageRectInImagePixels().isEmpty() &&
++        state.imageRectInWidgetPixels.topLeft() != -state.documentOffsetF) {
+         qWarning() << "The imageRectInWidgetPixels topLeft() does not match the documentOffsetF!";
+         qWarning() << "    imageRectInWidgetPixels:" << state.imageRectInWidgetPixels;
+         qWarning() << "    documentOffsetF:" << state.documentOffsetF;

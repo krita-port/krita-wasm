@@ -1,0 +1,31 @@
+Subject: [PATCH] Use one coherent swap mapping window on WebAssembly
+
+Overlapping MEMFS mappings may be separate copies rather than coherent
+MAP_SHARED views. Reuse the serialized write window for reads so undo
+snapshots see their compressed bytes, including before the window is unmapped.
+Native platforms retain their separate read and write windows.
+
+diff --git a/libs/image/tiles3/swap/kis_memory_window.cpp b/libs/image/tiles3/swap/kis_memory_window.cpp
+--- a/libs/image/tiles3/swap/kis_memory_window.cpp
++++ b/libs/image/tiles3/swap/kis_memory_window.cpp
+@@ -49,11 +49,20 @@
+ 
+ quint8* KisMemoryWindow::getReadChunkPtr(const KisChunkData &readChunk)
+ {
++#ifdef Q_OS_WASM
++    // MEMFS mmap() can create independent heap copies for overlapping
++    // MAP_SHARED mappings. Use the same window for reads and writes so a
++    // swapped tile is read from the buffer that received its compressed data.
++    // KisSwappedDataStore serializes pointer access with its existing mutex;
++    // remapping this window unmaps (and writes back) the previous one first.
++    return getWriteChunkPtr(readChunk);
++#else
+     if (!adjustWindow(readChunk, &m_readWindowEx, &m_writeWindowEx)) {
+         return nullptr;
+     }
+ 
+     return m_readWindowEx.calculatePointer(readChunk);
++#endif
+ }
+ 
+ quint8* KisMemoryWindow::getWriteChunkPtr(const KisChunkData &writeChunk)

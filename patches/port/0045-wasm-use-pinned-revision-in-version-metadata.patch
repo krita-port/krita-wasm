@@ -1,0 +1,28 @@
+Subject: [PATCH] Use verified upstream revision metadata for Wasm archive builds
+
+The derived source has no Git checkout. Do not walk into the enclosing port
+repository for its HEAD or branch. Read the pinned commit from the source
+provenance already verified by the build wrapper; keep desktop Git discovery.
+Upstream issue searches for Krita archive builds inheriting parent Git metadata
+found no matching report.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -230,8 +230,14 @@
+ set(KRITA_GIT_BRANCH_STRING "")
+ 
+ include(GetGitRevisionDescription)
+-get_git_head_hash(GIT_SHA1)
+-get_git_branch(GIT_BRANCH)
++if(EMSCRIPTEN)
++    file(READ "${CMAKE_SOURCE_DIR}/.krita-wasm-source.json" KRITA_WASM_SOURCE_MANIFEST)
++    string(JSON GIT_SHA1 GET "${KRITA_WASM_SOURCE_MANIFEST}" commit)
++    set(GIT_BRANCH "")
++else()
++    get_git_head_hash(GIT_SHA1)
++    get_git_branch(GIT_BRANCH)
++endif()
+ 
+ if(GIT_SHA1)
+    string(SUBSTRING ${GIT_SHA1} 0 7 GIT_SHA1)

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Compile Krita only, against the frozen prebuilt SDK.
+set -euo pipefail
+project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+sdk_environment=$(python3 "$project_root/scripts/sdk.py" environment)
+eval "$sdk_environment"
+sdk_prefix=$KRITA_SDK_DIR
+mkdir -p "$project_root/build/cmake"
+# The inherited descriptor keeps the lock alive even if the calling shell is
+# interrupted while Ninja is still shutting down.
+if [[ -n "${KRITA_BUILD_LOCK_FD:-}" ]]; then
+    exec 9>&"$KRITA_BUILD_LOCK_FD"
+else
+    exec 9>"$project_root/build/cmake/krita.lock"
+fi
+if ! flock -n 9; then
+    echo "Another Krita build is using this checkout; wait for it to exit." >&2
+    exit 1
+fi
+export KRITA_BUILD_LOCK_FD=9
+"$project_root/scripts/configure-krita"
+exec "$project_root/scripts/with-emsdk" ninja \
+    -C "$project_root/build/cmake/krita-${sdk_prefix##*/}-wasm" \
+    -j "${BUILD_JOBS:-6}" -k "${BUILD_KEEP_GOING:-10}" krita "$@"

@@ -1,0 +1,40 @@
+Subject: [PATCH] Preserve action lifecycle connections when switching views
+
+Only disconnect the outgoing action trigger/toggle handlers being replaced
+for the active view. Keep destroyed and other bookkeeping connections, as
+for the handbook action.
+
+Related upstream issue: https://bugs.kde.org/show_bug.cgi?id=509947
+The report lists these assistant and mirror-action disconnect diagnostics.
+This changes the disconnecting callers, not the upstream log-handler fix.
+
+diff --git a/libs/ui/KisDecorationsManager.cpp b/libs/ui/KisDecorationsManager.cpp
+--- a/libs/ui/KisDecorationsManager.cpp
++++ b/libs/ui/KisDecorationsManager.cpp
+@@ -45,8 +45,8 @@
+     // set view is called twice when a document is open, so we need to disconnect the original signals
+     // if m_imageView has already been created. This prevents double signal events firing
+     if (m_imageView) {
+-        m_toggleAssistant->disconnect();
+-        m_togglePreview->disconnect();
++        disconnect(m_toggleAssistant, &QAction::triggered, nullptr, nullptr);
++        disconnect(m_togglePreview, &QAction::triggered, nullptr, nullptr);
+ 
+         if (assistantsDecoration()) {
+             assistantsDecoration()->disconnect(this);
+diff --git a/libs/ui/kis_mirror_manager.cpp b/libs/ui/kis_mirror_manager.cpp
+--- a/libs/ui/kis_mirror_manager.cpp
++++ b/libs/ui/kis_mirror_manager.cpp
+@@ -56,9 +56,9 @@
+ void KisMirrorManager::setView(QPointer<KisView> imageView)
+ {
+     if (m_imageView) {
+-        m_mirrorCanvas->disconnect();
+-        m_mirrorCanvasAroundCursor->disconnect();
+-        m_mirrorCanvasAroundCanvas->disconnect();
++        disconnect(m_mirrorCanvas, &QAction::toggled, nullptr, nullptr);
++        disconnect(m_mirrorCanvasAroundCursor, &QAction::toggled, nullptr, nullptr);
++        disconnect(m_mirrorCanvasAroundCanvas, &QAction::toggled, nullptr, nullptr);
+ 
+         m_imageView->document()->disconnect(this);
+ 

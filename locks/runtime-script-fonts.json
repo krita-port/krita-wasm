@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "name": "gnu-freefont",
+  "version": "20120503",
+  "release_url": "https://ftp.gnu.org/gnu/freefont/freefont-ttf-20120503.zip",
+  "archive": {
+    "filename": "freefont-ttf-20120503.zip",
+    "url": "https://ftp.gnu.org/gnu/freefont/freefont-ttf-20120503.zip",
+    "sha256": "7c85baf1bf82a1a1845d1322112bc6ca982221b484e3b3925022e25b5cae89af"
+  },
+  "files": [
+    {
+      "member": "freefont-20120503/FreeSans.ttf",
+      "path": "fonts/FreeSans.ttf",
+      "destination": "/fonts/FreeSans.ttf",
+      "sha256": "c80858440d8fb618e0ac5ff6f16251dbfa6b3316f00f3cdd17d477297dd87b04"
+    },
+    {
+      "member": "freefont-20120503/FreeSerif.ttf",
+      "path": "fonts/FreeSerif.ttf",
+      "destination": "/fonts/FreeSerif.ttf",
+      "sha256": "658563c732eafdc851de2b3f38b27d0afcde5674b2f93440971b9693438c6494"
+    },
+    {
+      "member": "freefont-20120503/COPYING",
+      "path": "licenses/FreeFont-COPYING",
+      "destination": "/krita/share/licenses/runtime-fonts/FreeFont-COPYING",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "member": "freefont-20120503/README",
+      "path": "licenses/FreeFont-README",
+      "destination": "/krita/share/licenses/runtime-fonts/FreeFont-README",
+      "sha256": "d7375e3982a2e0afc471f8900c46ac6ea41b1112de1f5cdb9ca5c820adf25a33"
+    }
+  ]
+}

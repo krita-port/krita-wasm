@@ -1,0 +1,23 @@
+From: krita.js contributors
+Subject: [PATCH] cmake: exclude Emscripten from desktop X11 discovery
+
+Emscripten passes the existing non-Windows/non-Apple/non-Android guard,
+but has no X11 or desktop DBus integration. Use the existing non-desktop
+branch so HAVE_X11 and HAVE_DBUS remain false for the browser build.
+
+Applies to: Krita v6.0.4.1 (bd6e8d061d2f0388c5b10278786cf0fe62e3135f)
+Validation: patch application and unchanged native branch; full Wasm configure pending dependencies
+Upstream status: local porting patch, not submitted
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -902,7 +902,7 @@ if (Qt${QT_MAJOR_VERSION}QuickWidgets_FOUND)
+ endif()
+ 
+ 
+-if (NOT WIN32 AND NOT APPLE AND NOT ANDROID AND NOT HAIKU)
++if (NOT WIN32 AND NOT APPLE AND NOT ANDROID AND NOT HAIKU AND NOT EMSCRIPTEN)
+     if (QT_MAJOR_VERSION STREQUAL "5")
+         find_package(Qt${QT_MAJOR_VERSION} ${MIN_QT_VERSION} REQUIRED X11Extras)
+     endif()

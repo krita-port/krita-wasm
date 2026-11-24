@@ -1,0 +1,29 @@
+Subject: [PATCH] Treat expired synchronized notifications as normal cancellation
+
+Qt removes pending posted events when their receiver is destroyed. Events
+copied into Krita's private postponed queue cannot be removed by QObject's
+cleanup, but their QPointer is cleared and already prevents delivery.
+
+Saving through a nested event loop can destroy the background document and
+its shape-controller connections before the outer GUI event returns. Treat
+these expired notifications as cancelled without reporting a warning.
+Keep the lifetime guard and the delivery order of surviving receivers.
+
+Related upstream issue: https://bugs.kde.org/show_bug.cgi?id=488226
+The same diagnostic is reported during scripted save/close on desktop.
+This local change retains the existing cancellation guard.
+
+diff --git a/libs/ui/KisApplication.cpp b/libs/ui/KisApplication.cpp
+--- a/libs/ui/KisApplication.cpp
++++ b/libs/ui/KisApplication.cpp
+@@ -975,8 +975,9 @@
+         KisSynchronizedConnectionEvent typedEvent = info.postponedSynchronizationEvents.front();
+         info.postponedSynchronizationEvents.pop();
+ 
++        // Like Qt's posted events, notifications in this private queue are
++        // cancelled when their receiver is destroyed during a nested event loop.
+         if (!typedEvent.destination) {
+-            qWarning() << "WARNING: the destination object of KisSynchronizedConnection has been destroyed during postponed delivery";
+             continue;
+         }
+ 

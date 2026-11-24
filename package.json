@@ -1,0 +1,26 @@
+{
+  "name": "krita-wasm",
+  "type": "module",
+  "private": true,
+  "packageManager": "pnpm@12.21.0",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "dev": "vite",
+    "preview": "vite preview --mode manual",
+    "test:browser": "playwright test",
+    "build:web": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.worker.json && tsc -p tsconfig.json && tsc --ignoreConfig --strict --noEmit --skipLibCheck --target ES2022 --module NodeNext eslint.config.ts",
+    "test": "node --test tests/test_*.ts",
+    "lint": "eslint --flag unstable_native_nodejs_ts_config ."
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "10.0.0",
+    "@playwright/test": "1.65.1",
+    "@types/emscripten": "1.41.6",
+    "@types/node": "26.5.1",
+    "eslint": "10.15.0",
+    "sirv": "3.0.2",
+    "typescript": "6.0.3",
+    "vite": "8.3.8"
+  }
+}

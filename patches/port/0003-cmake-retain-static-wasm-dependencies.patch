@@ -1,0 +1,59 @@
+Subject: [PATCH] Retain static Wasm image and font dependencies
+
+Use Exiv2 upstream exports for zlib/Expat and pkg-config static font
+interfaces for the FreeType/HarfBuzz cycle. Native discovery is unchanged.
+
+diff --git a/cmake/modules/FindLibExiv2.cmake b/cmake/modules/FindLibExiv2.cmake
+--- a/cmake/modules/FindLibExiv2.cmake
++++ b/cmake/modules/FindLibExiv2.cmake
+@@ -41,6 +41,21 @@
+ #
+ # SPDX-License-Identifier: BSD-3-Clause
+ #=============================================================================
++
++# Use the upstream static export so Expat/zlib dependencies are retained.
++if(EMSCRIPTEN)
++    find_package(exiv2 CONFIG REQUIRED)
++    set(LibExiv2_VERSION "${exiv2_VERSION}")
++    set(LibExiv2_LIBRARIES Exiv2::exiv2lib)
++    get_target_property(LibExiv2_INCLUDE_DIRS Exiv2::exiv2lib INTERFACE_INCLUDE_DIRECTORIES)
++    include(FindPackageHandleStandardArgs)
++    find_package_handle_standard_args(LibExiv2 REQUIRED_VARS LibExiv2_LIBRARIES LibExiv2_INCLUDE_DIRS VERSION_VAR LibExiv2_VERSION)
++    if(NOT TARGET LibExiv2::LibExiv2)
++        add_library(LibExiv2::LibExiv2 INTERFACE IMPORTED)
++        target_link_libraries(LibExiv2::LibExiv2 INTERFACE Exiv2::exiv2lib)
++    endif()
++    return()
++endif()
+ 
+ find_package(PkgConfig QUIET)
+ pkg_check_modules(PC_EXIV2 QUIET exiv2)
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1630,6 +1630,11 @@
+     PURPOSE "Needed for rendering text vector shapes."
+ )
+ 
++if(EMSCRIPTEN)
++    include(KritaWasmStaticDependencies)
++    krita_link_wasm_static_dependencies()
++endif()
++
+ ##
+ ## Build vendored libraries
+ ##
+diff --git a/cmake/modules/KritaWasmStaticDependencies.cmake b/cmake/modules/KritaWasmStaticDependencies.cmake
+new file mode 100644
+--- /dev/null
++++ b/cmake/modules/KritaWasmStaticDependencies.cmake
+@@ -0,0 +1,9 @@
++# Preserve the complete archive link interface of the browser font stack.
++function(krita_link_wasm_static_dependencies)
++    find_package(PkgConfig REQUIRED)
++    list(APPEND PKG_CONFIG_ARGN --static)
++    pkg_check_modules(KRITA_WASM_FONT_STACK REQUIRED IMPORTED_TARGET GLOBAL fontconfig harfbuzz freetype2)
++    foreach(target Fontconfig::Fontconfig HarfBuzz::HarfBuzz Freetype::Freetype)
++        set_property(TARGET ${target} APPEND PROPERTY INTERFACE_LINK_LIBRARIES PkgConfig::KRITA_WASM_FONT_STACK)
++    endforeach()
++endfunction()

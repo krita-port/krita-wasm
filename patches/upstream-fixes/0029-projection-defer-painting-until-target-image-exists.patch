@@ -1,0 +1,32 @@
+Subject: [PATCH] Defer projection painting until a target image exists
+
+Image cache updates can arrive before viewport initialization allocates the
+prescaled QImage. Keep backend cache updates, but skip drawing into a null
+image; the normal viewport allocation and prescale redraw it later.
+
+Related upstream report (historical startup QPainter diagnostics):
+https://bugs.kde.org/show_bug.cgi?id=289419
+That report was resolved; this guard addresses the current null-image path,
+not a backport of its resolution.
+
+diff --git a/libs/ui/canvas/kis_prescaled_projection.cpp b/libs/ui/canvas/kis_prescaled_projection.cpp
+--- a/libs/ui/canvas/kis_prescaled_projection.cpp
++++ b/libs/ui/canvas/kis_prescaled_projection.cpp
+@@ -285,7 +285,7 @@
+ 
+ void KisPrescaledProjection::preScale()
+ {
+-    if (!m_d->image) return;
++    if (!m_d->image || m_d->prescaledQImage.isNull()) return;
+ 
+     m_d->prescaledQImage.fill(0);
+ 
+@@ -418,6 +418,8 @@
+ 
+ void KisPrescaledProjection::updateScaledImage(KisPPUpdateInfoSP info)
+ {
++    if (m_d->prescaledQImage.isNull()) return;
++
+     QPainter gc(&m_d->prescaledQImage);
+     gc.setCompositionMode(QPainter::CompositionMode_Source);
+     drawUsingBackend(gc, info);
